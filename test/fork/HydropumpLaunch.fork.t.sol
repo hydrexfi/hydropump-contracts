@@ -2,72 +2,233 @@
 pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
+import {console2} from "forge-std/console2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {HydropumpLaunchpad} from "../../contracts/HydropumpLaunchpad.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
+import {HydropumpLauncher} from "../../contracts/HydropumpLauncher.sol";
 import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
 import {IAlgebraPool} from "../../contracts/interfaces/IAlgebraPool.sol";
 import {INonfungiblePositionManager} from "../../contracts/interfaces/INonfungiblePositionManager.sol";
 import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.sol";
 
-/// @notice End-to-end launch against live Hydrex contracts on Base.
-/// @dev Requires BASE_RPC_URL; skipped when it is unset so `forge test` stays offline-clean.
+/// @notice Full launch against the live Hydrex deployment on Base.
+/// @dev Requires BASE_RPC_URL; skipped when unset so `forge test` stays offline-clean.
 contract HydropumpLaunchForkTest is Test {
-    HydropumpLaunchpad internal launchpad;
+    INonfungiblePositionManager internal constant NPM =
+        INonfungiblePositionManager(HydropumpAddresses.NONFUNGIBLE_POSITION_MANAGER);
+    address internal constant WETH = HydropumpAddresses.WETH;
 
-    address internal vaultOwner = makeAddr("vaultOwner");
+    /// @dev ETH at ~$4,000: $5k FDV over 10B supply is 1.25e-10 WETH per token, floored to the 200 spacing.
+    int24 internal constant WETH_START_TICK = -228_200;
+
+    HydropumpLauncher internal launcher;
+    HydropumpLocker internal locker;
+
+    address internal owner = makeAddr("owner");
     address internal creator = makeAddr("creator");
-    address internal feeClaimer = makeAddr("feeClaimer");
+    address internal buyback = makeAddr("buyback");
 
     bool internal forked;
 
     function setUp() public {
         string memory rpc = vm.envOr("BASE_RPC_URL", string(""));
         if (bytes(rpc).length == 0) return;
-
         vm.createSelectFork(rpc);
         forked = true;
-        launchpad = new HydropumpLaunchpad(vaultOwner);
+
+        locker = HydropumpLocker(
+            address(
+                new ERC1967Proxy(
+                    address(new HydropumpLocker()),
+                    abi.encodeCall(
+                        HydropumpLocker.initialize, (owner, address(0), buyback, uint64(8_000), uint64(3_000))
+                    )
+                )
+            )
+        );
+        launcher = HydropumpLauncher(
+            address(
+                new ERC1967Proxy(
+                    address(new HydropumpLauncher()),
+                    abi.encodeCall(HydropumpLauncher.initialize, (owner, owner, address(locker)))
+                )
+            )
+        );
+
+        vm.startPrank(owner);
+        locker.setLauncher(address(launcher));
+        address[] memory quotes = new address[](1);
+        bool[] memory enabled = new bool[](1);
+        int24[] memory ticks = new int24[](1);
+        (quotes[0], enabled[0], ticks[0]) = (WETH, true, WETH_START_TICK);
+        launcher.configureQuoteTokens(quotes, enabled, ticks);
+        vm.stopPrank();
     }
 
-    function test_LaunchCreatesPoolAndLocksLiquidity() public {
+    function _mineSalt(address deployer) internal view returns (bytes32 salt) {
+        for (uint256 i = 0; i < 20_000; i++) {
+            salt = bytes32(i);
+            if (launcher.isSaltValid(deployer, salt, WETH)) return salt;
+        }
+        revert("no salt found");
+    }
+
+    function test_LaunchSeedsTheCurveAndLocksEveryPosition() public {
         if (!forked) {
             vm.skip(true);
         }
 
+        bytes32 salt = _mineSalt(creator);
+
         vm.prank(creator);
-        (address token, address pool, uint256 tokenId) = launchpad.launch("Alpha", "ALPHA", "ipfs://alpha", feeClaimer);
+        (address token, address pool, uint256[] memory positionIds) = launcher.launch(
+            HydropumpLauncher.LaunchParams({
+                name: "Alpha",
+                symbol: "ALPHA",
+                metadataURI: "ipfs://alpha",
+                quoteToken: WETH,
+                userSalt: salt,
+                creatorRecipient: creator,
+                buyAmount: 0
+            })
+        );
 
-        // Pool is live and paired with WETH
-        assertTrue(pool != address(0), "pool not created");
-        address token0 = IAlgebraPool(pool).token0();
-        address token1 = IAlgebraPool(pool).token1();
-        assertTrue(token0 == token || token1 == token, "launch token not in pool");
-        assertTrue(token0 == HydropumpAddresses.WETH || token1 == HydropumpAddresses.WETH, "pool not paired with WETH");
-        assertGt(IAlgebraPool(pool).liquidity() + 1, 0);
+        // --- token0 invariant ---
+        assertLt(uint160(token), uint160(WETH), "token must sort below the quote");
+        assertEq(IAlgebraPool(pool).token0(), token, "launch token must be token0");
+        assertEq(IAlgebraPool(pool).token1(), WETH, "quote must be token1");
 
-        // Entire supply went into the position; the launchpad keeps nothing
-        assertEq(IERC20(token).totalSupply(), launchpad.DEFAULT_SUPPLY());
-        assertEq(IERC20(token).balanceOf(address(launchpad)), 0);
+        // --- pool opened at the configured start tick ---
+        (, int24 currentTick,,,,) = IAlgebraPool(pool).globalState();
+        assertEq(currentTick, WETH_START_TICK, "pool must open at the configured start tick");
 
-        // LP NFT is locked in a per-launch locker owned by the vault owner
-        HydropumpLocker locker = launchpad.tokenToLocker(token);
-        assertTrue(address(locker) != address(0), "locker not deployed");
-        assertEq(locker.getNFTId(), tokenId);
-        assertEq(locker.getLaunchToken(), token);
-        assertEq(locker.feeClaimer(), feeClaimer);
-        assertEq(locker.owner(), vaultOwner);
+        // --- the launch never needed a single wei of quote ---
+        assertEq(IERC20(WETH).balanceOf(address(launcher)), 0);
+        assertEq(IERC20(WETH).balanceOf(address(locker)), 0, "single-sided: no quote in any position");
 
-        (,,,,,,, uint128 liquidity,,,,) =
-            INonfungiblePositionManager(HydropumpAddresses.NONFUNGIBLE_POSITION_MANAGER).positions(tokenId);
-        assertGt(liquidity, 0, "no liquidity minted");
+        // --- full supply deployed, nothing stranded in the launcher ---
+        assertEq(IERC20(token).totalSupply(), launcher.SUPPLY());
+        assertEq(IERC20(token).balanceOf(address(launcher)), 0, "launcher must hold nothing after launch");
+        uint256 dust = IERC20(token).balanceOf(creator);
+        // Liquidity math rounds down per band; the remainder refunded to the creator is a rounding artefact,
+        // not a meaningful allocation. 1e12 wei is one millionth of one token out of a 10B supply.
+        assertLt(dust, 1e12, "mint remainder refunded to the creator must be dust");
+        assertApproxEqRel(IERC20(token).balanceOf(pool), launcher.SUPPLY(), 1e12, "supply must sit in the pool");
 
-        // Bookkeeping
-        assertEq(launchpad.getTotalLaunches(), 1);
-        HydropumpLaunchpad.LaunchDetails memory details = launchpad.getLaunchByToken(token);
-        assertEq(details.creator, creator);
-        assertEq(details.pool, pool);
-        assertEq(details.locker, address(locker));
-        assertEq(details.symbol, "ALPHA");
-        assertEq(details.image, "ipfs://alpha");
+        // --- five bands, all locked, monotonic and contiguous ---
+        int24 spacing = IAlgebraPool(pool).tickSpacing();
+        int24 previousUpper;
+        uint128 totalLiquidity;
+        for (uint256 i = 0; i < 5; i++) {
+            (,,,,, int24 tickLower, int24 tickUpper, uint128 liquidity,,,,) = NPM.positions(positionIds[i]);
+
+            assertEq(NPM.ownerOf(positionIds[i]), address(locker), "position must be locked");
+            assertGt(liquidity, 0, "band must hold liquidity");
+            assertGe(tickLower, currentTick, "band must sit at or above the current tick");
+            assertEq(tickLower % spacing, 0, "band must align to spacing");
+            assertEq(tickUpper % spacing, 0, "band must align to spacing");
+            if (i > 0) assertEq(tickLower, previousUpper, "bands must be contiguous");
+            previousUpper = tickUpper;
+            totalLiquidity += liquidity;
+        }
+        assertGt(totalLiquidity, 0);
+
+        // --- the locker knows the launch ---
+        HydropumpLocker.Launch memory launch = locker.getLaunch(token);
+        assertEq(launch.pool, pool);
+        assertEq(launch.creator, creator);
+        assertEq(launch.creatorRecipient, creator);
+        assertEq(launch.positionIds[4], positionIds[4]);
+
+        console2.log("token", token);
+        console2.log("pool ", pool);
+        console2.log("tick spacing", int256(spacing));
+        console2.log("creator dust refund", dust);
+    }
+
+    function test_LaunchWithBuyFillsInTheSameTransaction() public {
+        if (!forked) {
+            vm.skip(true);
+        }
+
+        uint256 buyAmount = 0.05 ether;
+        deal(WETH, creator, buyAmount);
+
+        bytes32 salt = _mineSalt(creator);
+
+        vm.startPrank(creator);
+        IERC20(WETH).approve(address(launcher), buyAmount);
+        (address token, address pool,) = launcher.launch(
+            HydropumpLauncher.LaunchParams({
+                name: "Alpha",
+                symbol: "ALPHA",
+                metadataURI: "",
+                quoteToken: WETH,
+                userSalt: salt,
+                creatorRecipient: creator,
+                buyAmount: buyAmount
+            })
+        );
+        vm.stopPrank();
+
+        assertGt(IERC20(token).balanceOf(creator), 0, "buyer must receive tokens");
+        assertEq(IERC20(WETH).balanceOf(creator), 0, "full buy amount must be spent");
+        assertEq(IERC20(WETH).balanceOf(address(launcher)), 0, "no quote may be left in the launcher");
+        assertEq(IERC20(WETH).balanceOf(pool), buyAmount, "quote must land in the pool");
+
+        (, int24 tickAfter,,,,) = IAlgebraPool(pool).globalState();
+        assertGt(tickAfter, WETH_START_TICK, "the buy must move the price up");
+    }
+
+    function test_ZeroBuyAmountSkipsTheSwap() public {
+        if (!forked) {
+            vm.skip(true);
+        }
+
+        bytes32 salt = _mineSalt(creator);
+        vm.prank(creator);
+        (address token, address pool,) = launcher.launch(
+            HydropumpLauncher.LaunchParams({
+                name: "Alpha",
+                symbol: "ALPHA",
+                metadataURI: "",
+                quoteToken: WETH,
+                userSalt: salt,
+                creatorRecipient: creator,
+                buyAmount: 0
+            })
+        );
+
+        assertEq(IERC20(WETH).balanceOf(pool), 0, "no quote should enter the pool");
+        assertLt(IERC20(token).balanceOf(creator), 1e12, "creator gets mint dust only, no bought tokens");
+
+        (, int24 tickAfter,,,,) = IAlgebraPool(pool).globalState();
+        assertEq(tickAfter, WETH_START_TICK);
+    }
+
+    function test_LaunchPoolIsNotGauged() public {
+        if (!forked) {
+            vm.skip(true);
+        }
+
+        bytes32 salt = _mineSalt(creator);
+        vm.prank(creator);
+        (, address pool,) = launcher.launch(
+            HydropumpLauncher.LaunchParams({
+                name: "Alpha",
+                symbol: "ALPHA",
+                metadataURI: "",
+                quoteToken: WETH,
+                userSalt: salt,
+                creatorRecipient: creator,
+                buyAmount: 0
+            })
+        );
+
+        // A gauged Hydrex CL pool runs at communityFee 1000/1000, which would send 100% of swap fees to the
+        // community vault and leave the locked positions — and so the creator and the buyback — with nothing.
+        (,,,, uint16 communityFee,) = IAlgebraPool(pool).globalState();
+        assertEq(communityFee, 0, "launch pools must keep fees with the LP");
     }
 }

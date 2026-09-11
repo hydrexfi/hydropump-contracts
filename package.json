@@ -1,22 +1,24 @@
 {
   "name": "hydropump",
-  "version": "0.1.0",
-  "description": "Permissionless launchpad contracts for Hydrex on Base",
+  "version": "0.2.0",
+  "description": "Permissionless token launch contracts for Hydrex on Base",
   "author": "Hydrex Association",
   "license": "MIT",
   "private": true,
   "scripts": {
-    "build": "forge build",
-    "test": "forge test",
     "test:fork": "forge test --match-path 'test/fork/*' -vv",
-    "fmt": "forge fmt",
-    "deploy:launchpad:base": "source .env && NETWORK=base forge script script/DeployHydropumpLaunchpad.s.sol:DeployHydropumpLaunchpad --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast --verify --verifier etherscan --verifier-url \"https://api.etherscan.io/v2/api?chainid=8453\" --etherscan-api-key $BASESCAN_API_KEY",
-    "launch:token:base": "source .env && forge script script/LaunchToken.s.sol:LaunchToken --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast",
-    "verify:token:base": "set -a && source .env && set +a && ./script/verify-token-base.sh",
-    "verify:locker:base": "set -a && source .env && set +a && ./script/verify-locker-base.sh",
-    "verify:launch:base": "set -a && source .env && set +a && ./script/verify-launch-base.sh"
+    "deploy:base": "source .env && NETWORK=base forge script script/deploy/DeployHydropump.s.sol:DeployHydropump --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast --verify --verifier etherscan --verifier-url \"https://api.etherscan.io/v2/api?chainid=8453\" --etherscan-api-key $BASESCAN_API_KEY",
+    "quotes:build": "node script/quotes/build-quote-tokens.mjs",
+    "quotes:register:base": "source .env && forge script script/quotes/RegisterQuoteTokens.s.sol:RegisterQuoteTokens --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast",
+    "quotes:refresh:base": "source .env && REFRESH_ONLY=true forge script script/quotes/RegisterQuoteTokens.s.sol:RegisterQuoteTokens --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast",
+    "deploy:gauge-seed:base": "source .env && forge script script/deploy/DeployGaugeSeed.s.sol:DeployGaugeSeed --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast --verify --verifier etherscan --verifier-url \"https://api.etherscan.io/v2/api?chainid=8453\" --etherscan-api-key $BASESCAN_API_KEY",
+    "stake:gauge:base": "source .env && forge script script/deploy/StakeGaugeLP.s.sol:StakeGaugeLP --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast"
   },
   "dependencies": {
-    "@openzeppelin/contracts": "^5.4.0"
+    "@openzeppelin/contracts": "^5.4.0",
+    "@openzeppelin/contracts-upgradeable": "^5.4.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.6"
   }
 }

@@ -57,4 +57,6 @@ interface INonfungiblePositionManager {
         );
 
     function safeTransferFrom(address from, address to, uint256 tokenId, bytes calldata data) external;
+
+    function ownerOf(uint256 tokenId) external view returns (address);
 }

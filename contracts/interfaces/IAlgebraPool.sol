@@ -8,6 +8,10 @@ interface IAlgebraPool {
 
     function liquidity() external view returns (uint128);
 
+    function tickSpacing() external view returns (int24);
+
+    function fee() external view returns (uint16);
+
     function globalState()
         external
         view
