@@ -129,7 +129,11 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
 
     /// @notice Whether a salt yields a token that sorts below `quoteToken`, i.e. one the pool will treat
     ///         as token0. The frontend bumps the salt until this holds.
-    function isSaltValid(address deployer, bytes32 userSalt, address quoteToken) external view returns (bool) {
+    function isSaltValid(
+        address deployer,
+        bytes32 userSalt,
+        address quoteToken
+    ) external view returns (bool) {
         return predictToken(deployer, userSalt) < quoteToken;
     }
 
@@ -164,10 +168,9 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
                               USER WRITE
     //////////////////////////////////////////////////////////////*/
 
-    function launch(LaunchParams calldata params)
-        external
-        returns (address token, address pool, uint256[] memory positionIds)
-    {
+    function launch(
+        LaunchParams calldata params
+    ) external returns (address token, address pool, uint256[] memory positionIds) {
         QuoteConfig memory quote = quoteTokens[params.quoteToken];
         if (!quote.enabled) revert QuoteTokenNotEnabled();
         if (quote.updatedAt == 0) revert StartTickUnset();
@@ -183,7 +186,11 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         delete _pendingToken;
 
         pool = nonfungiblePositionManager.createAndInitializePoolIfNecessary(
-            token, params.quoteToken, address(0), TickMath.getSqrtRatioAtTick(quote.startTick), ""
+            token,
+            params.quoteToken,
+            address(0),
+            TickMath.getSqrtRatioAtTick(quote.startTick),
+            ""
         );
         if (pool == address(0)) revert PoolCreationFailed();
 
@@ -191,9 +198,17 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
 
         if (params.buyAmount > 0) _buy(token, params.quoteToken, params.buyAmount);
 
-        address creatorRecipient = params.creatorRecipient == address(0) ? msg.sender : params.creatorRecipient;
-        IHydropumpLocker(locker)
-            .registerLaunch(token, params.quoteToken, pool, msg.sender, creatorRecipient, positionIds);
+        address creatorRecipient = params.creatorRecipient == address(0)
+            ? msg.sender
+            : params.creatorRecipient;
+        IHydropumpLocker(locker).registerLaunch(
+            token,
+            params.quoteToken,
+            pool,
+            msg.sender,
+            creatorRecipient,
+            positionIds
+        );
 
         uint256 dust = IERC20(token).balanceOf(address(this));
         if (dust > 0) IERC20(token).safeTransfer(msg.sender, dust);
@@ -242,10 +257,12 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
 
     /// @dev Bands are aligned to the pool's actual tick spacing and all sit at or above the current tick, so
     ///      every mint is pure token0 — asserted via `QuoteConsumed`, not assumed.
-    function _mintBands(address token, address quoteToken, address pool, int24 startTick)
-        internal
-        returns (uint256[] memory positionIds)
-    {
+    function _mintBands(
+        address token,
+        address quoteToken,
+        address pool,
+        int24 startTick
+    ) internal returns (uint256[] memory positionIds) {
         uint256 count = bandCount();
         positionIds = new uint256[](count);
 
@@ -265,7 +282,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
             uint256 amount = i == count - 1 ? SUPPLY - assigned : (SUPPLY * shareBps) / 10_000;
             assigned += amount;
 
-            (uint256 positionId,,, uint256 quoteUsed) = nonfungiblePositionManager.mint(
+            (uint256 positionId, , , uint256 quoteUsed) = nonfungiblePositionManager.mint(
                 INonfungiblePositionManager.MintParams({
                     token0: token,
                     token1: quoteToken,
@@ -330,13 +347,19 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
             address quoteToken = quoteTokenList[i];
             if (quoteToken == address(0)) revert ZeroAddress();
 
-            quoteTokens[quoteToken] =
-                QuoteConfig({enabled: enabledList[i], startTick: startTickList[i], updatedAt: uint64(block.timestamp)});
+            quoteTokens[quoteToken] = QuoteConfig({
+                enabled: enabledList[i],
+                startTick: startTickList[i],
+                updatedAt: uint64(block.timestamp)
+            });
             emit QuoteTokenConfigured(quoteToken, enabledList[i], startTickList[i]);
         }
     }
 
-    function setStartTicks(address[] calldata quoteTokenList, int24[] calldata startTickList) external onlyOwner {
+    function setStartTicks(
+        address[] calldata quoteTokenList,
+        int24[] calldata startTickList
+    ) external onlyOwner {
         if (quoteTokenList.length != startTickList.length) revert LengthMismatch();
         for (uint256 i = 0; i < quoteTokenList.length; i++) {
             _setStartTick(quoteTokenList[i], startTickList[i]);
