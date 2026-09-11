@@ -1,0 +1,22 @@
+{
+  "name": "hydropump",
+  "version": "0.1.0",
+  "description": "Permissionless launchpad contracts for Hydrex on Base",
+  "author": "Hydrex Association",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build": "forge build",
+    "test": "forge test",
+    "test:fork": "forge test --match-path 'test/fork/*' -vv",
+    "fmt": "forge fmt",
+    "deploy:launchpad:base": "source .env && NETWORK=base forge script script/DeployHydropumpLaunchpad.s.sol:DeployHydropumpLaunchpad --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast --verify --verifier etherscan --verifier-url \"https://api.etherscan.io/v2/api?chainid=8453\" --etherscan-api-key $BASESCAN_API_KEY",
+    "launch:token:base": "source .env && forge script script/LaunchToken.s.sol:LaunchToken --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast",
+    "verify:token:base": "set -a && source .env && set +a && ./script/verify-token-base.sh",
+    "verify:locker:base": "set -a && source .env && set +a && ./script/verify-locker-base.sh",
+    "verify:launch:base": "set -a && source .env && set +a && ./script/verify-launch-base.sh"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0"
+  }
+}
