@@ -45,7 +45,6 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     struct LaunchParams {
         string name;
         string symbol;
-        string metadataURI;
         address quoteToken;
         bytes32 userSalt;
         address creatorRecipient;
@@ -53,6 +52,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     }
 
     address public locker;
+    uint96 public launchFee;
     address public admin;
 
     mapping(address quoteToken => QuoteConfig) public quoteTokens;
@@ -72,10 +72,11 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         uint256[] positionIds,
         string name,
         string symbol,
-        string metadataURI,
         uint64 timestamp
     );
     event LaunchBought(address indexed token, address indexed buyer, uint256 quoteIn, uint256 tokensOut);
+    event LaunchFeeUpdated(uint96 previousFee, uint96 newFee);
+    event LaunchFeesClaimed(address indexed to, uint256 amount);
     event QuoteTokenConfigured(address indexed quoteToken, bool enabled, int24 startTick);
     event StartTickUpdated(address indexed quoteToken, int24 previousTick, int24 newTick);
     event AdminUpdated(address indexed previousAdmin, address indexed newAdmin);
@@ -88,6 +89,8 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     error LengthMismatch();
     error StartTickUnset();
     error PoolCreationFailed();
+    error InsufficientLaunchFee();
+    error TransferFailed();
     error TokenAddressMismatch();
     error QuoteConsumed();
 
@@ -99,16 +102,23 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         _disableInitializers();
     }
 
-    function initialize(address _owner, address _admin, address _locker) external initializer {
+    function initialize(
+        address _owner,
+        address _admin,
+        address _locker,
+        uint96 _launchFee
+    ) external initializer {
         if (_owner == address(0) || _admin == address(0) || _locker == address(0)) revert ZeroAddress();
         __Ownable_init(_owner);
         __Ownable2Step_init();
 
         admin = _admin;
         locker = _locker;
+        launchFee = _launchFee;
 
         emit AdminUpdated(address(0), _admin);
         emit LockerUpdated(address(0), _locker);
+        emit LaunchFeeUpdated(0, _launchFee);
     }
 
     modifier onlyAdmin() {
@@ -170,7 +180,10 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
 
     function launch(
         LaunchParams calldata params
-    ) external returns (address token, address pool, uint256[] memory positionIds) {
+    ) external payable returns (address token, address pool, uint256[] memory positionIds) {
+        // A minimum, and any surplus is kept. No refund path means no call back into the caller here.
+        if (msg.value < launchFee) revert InsufficientLaunchFee();
+
         QuoteConfig memory quote = quoteTokens[params.quoteToken];
         if (!quote.enabled) revert QuoteTokenNotEnabled();
         if (quote.updatedAt == 0) revert StartTickUnset();
@@ -222,7 +235,6 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
             positionIds,
             params.name,
             params.symbol,
-            params.metadataURI,
             uint64(block.timestamp)
         );
     }
@@ -374,7 +386,25 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         admin = newAdmin;
     }
 
-    function setLocker(address newLocker) external onlyOwner {
+    function setLaunchFee(uint96 newLaunchFee) external onlyAdmin {
+        emit LaunchFeeUpdated(launchFee, newLaunchFee);
+        launchFee = newLaunchFee;
+    }
+
+    /// @notice Sweep collected launch fees.
+    function claimLaunchFees(address to) external onlyAdmin returns (uint256 amount) {
+        if (to == address(0)) revert ZeroAddress();
+
+        amount = address(this).balance;
+        (bool ok, ) = to.call{value: amount}("");
+        if (!ok) revert TransferFailed();
+
+        emit LaunchFeesClaimed(to, amount);
+    }
+
+    /// @dev Admin-gated, not owner-gated. Repointing the locker redirects where every future launch's
+    ///      liquidity is locked, so it sits with the Safe rather than the key that runs the daily jobs.
+    function setLocker(address newLocker) external onlyAdmin {
         if (newLocker == address(0)) revert ZeroAddress();
         emit LockerUpdated(locker, newLocker);
         locker = newLocker;

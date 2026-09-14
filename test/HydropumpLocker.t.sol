@@ -8,6 +8,7 @@ import {HydropumpLocker} from "../contracts/HydropumpLocker.sol";
 import {HydropumpAddresses} from "../contracts/libraries/HydropumpAddresses.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockPositionManager} from "./mocks/MockPositionManager.sol";
+import {INonfungiblePositionManager} from "../contracts/interfaces/INonfungiblePositionManager.sol";
 
 contract HydropumpLockerTest is Test {
     address internal constant NPM = HydropumpAddresses.NONFUNGIBLE_POSITION_MANAGER;
@@ -43,7 +44,7 @@ contract HydropumpLockerTest is Test {
             address(
                 new ERC1967Proxy(
                     address(new HydropumpLocker()),
-                    abi.encodeCall(HydropumpLocker.initialize, (owner, launcher, buyback, uint64(8_000), uint64(3_000)))
+                    abi.encodeCall(HydropumpLocker.initialize, (owner, launcher, buyback, uint64(7_500), uint64(2_500)))
                 )
             )
         );
@@ -128,19 +129,19 @@ contract HydropumpLockerTest is Test {
     // =============================
 
     function test_ClaimableReportsCreditedFeesForBothAssets() public {
-        _fund(1, 11_000, 22_000);
+        _fund(1, 10_000, 20_000);
         locker.collect(address(launchToken), 0x01);
 
         HydropumpLocker.ClaimableFees memory fees = locker.claimable(address(launchToken));
 
         assertEq(fees.launchToken, address(launchToken));
         assertEq(fees.quoteToken, address(quote));
-        assertEq(fees.launchTokenAmount, 8_000);
-        assertEq(fees.quoteAmount, 16_000);
+        assertEq(fees.launchTokenAmount, 7_500);
+        assertEq(fees.quoteAmount, 15_000);
     }
 
     function test_ClaimableGoesToZeroAfterClaim() public {
-        _fund(1, 11_000, 0);
+        _fund(1, 10_000, 0);
         locker.collect(address(launchToken), 0x01);
         locker.claim(address(launchToken));
 
@@ -154,7 +155,7 @@ contract HydropumpLockerTest is Test {
         vm.prank(launcher);
         locker.registerLaunch(address(second), address(quote), makeAddr("pool2"), creator, creatorRecipient, ids2);
 
-        _fund(1, 11_000, 0);
+        _fund(1, 10_000, 0);
         locker.collect(address(launchToken), 0x01);
 
         address[] memory tokens = new address[](2);
@@ -162,44 +163,44 @@ contract HydropumpLockerTest is Test {
         HydropumpLocker.ClaimableFees[] memory fees = locker.claimableMany(tokens);
 
         assertEq(fees.length, 2);
-        assertEq(fees[0].launchTokenAmount, 8_000);
+        assertEq(fees[0].launchTokenAmount, 7_500);
         assertEq(fees[1].launchTokenAmount, 0);
         assertEq(fees[1].quoteToken, address(quote));
     }
 
     function test_TotalOwedIncludesFeesStillInThePositions() public {
-        _fund(1, 11_000, 0); // collected and credited
+        _fund(1, 10_000, 0); // collected and credited
         locker.collect(address(launchToken), 0x01);
-        _fund(3, 22_000, 11_000); // still sitting in a position
+        _fund(3, 20_000, 10_000); // still sitting in a position
 
-        assertEq(locker.claimable(address(launchToken)).launchTokenAmount, 8_000, "claimable sees credited only");
+        assertEq(locker.claimable(address(launchToken)).launchTokenAmount, 7_500, "claimable sees credited only");
 
         HydropumpLocker.ClaimableFees memory owed = locker.totalOwed(address(launchToken));
 
-        assertEq(owed.launchTokenAmount, 8_000 + 16_000);
-        assertEq(owed.quoteAmount, 8_000);
+        assertEq(owed.launchTokenAmount, 7_500 + 15_000);
+        assertEq(owed.quoteAmount, 7_500);
     }
 
     function test_TotalOwedSentAsATransactionIsJustACollect() public {
-        _fund(2, 11_000, 0);
+        _fund(2, 10_000, 0);
 
         locker.totalOwed(address(launchToken));
 
         // Fees were collected and split as normal, nothing stranded.
-        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 8_000);
-        assertEq(launchToken.balanceOf(buyback), 3_000);
+        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 7_500);
+        assertEq(locker.protocolOwed(address(launchToken)), 2_500);
     }
 
-    function test_CollectSplits0800Creator0300Protocol() public {
-        // 11000 wei splits exactly along the 0.8% / 0.3% shares of the 1.1% pool fee
-        _fund(1, 11_000, 22_000);
+    function test_CollectSplitsSeventyFiveTwentyFive() public {
+        // 10000 wei splits exactly along the 75 / 25 shares
+        _fund(1, 10_000, 20_000);
 
         locker.collect(address(launchToken), 0x01);
 
-        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 8_000);
-        assertEq(locker.creatorOwed(address(launchToken), address(quote)), 16_000);
-        assertEq(launchToken.balanceOf(buyback), 3_000);
-        assertEq(quote.balanceOf(buyback), 6_000);
+        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 7_500);
+        assertEq(locker.creatorOwed(address(launchToken), address(quote)), 15_000);
+        assertEq(locker.protocolOwed(address(launchToken)), 2_500);
+        assertEq(locker.protocolOwed(address(quote)), 5_000);
     }
 
     function test_CollectOnlyTouchesMaskedPositions() public {
@@ -231,14 +232,14 @@ contract HydropumpLockerTest is Test {
     }
 
     function test_CollectIsPermissionlessButDestinationsAreFixed() public {
-        _fund(1, 11_000, 0);
+        _fund(1, 10_000, 0);
 
         vm.prank(stranger);
         locker.collect(address(launchToken), 0x01);
 
         assertEq(launchToken.balanceOf(stranger), 0, "caller must not receive anything");
-        assertEq(launchToken.balanceOf(buyback), 3_000);
-        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 8_000);
+        assertEq(locker.protocolOwed(address(launchToken)), 2_500);
+        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 7_500);
     }
 
     function test_CollectRevertsOnUnknownLaunchOrEmptyMask() public {
@@ -257,17 +258,17 @@ contract HydropumpLockerTest is Test {
         locker.collect(address(launchToken), 0x01);
 
         assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 5_000);
-        assertEq(launchToken.balanceOf(buyback), 5_000);
+        assertEq(locker.protocolOwed(address(launchToken)), 5_000);
     }
 
     function test_FeeSplitIsARatioNotAnAbsoluteRate() public {
         vm.prank(owner);
-        locker.setFeeSplit(800, 300); // same ratio as 8000/3000
+        locker.setFeeSplit(75, 25); // same ratio as 7500/2500
 
-        _fund(1, 11_000, 0);
+        _fund(1, 10_000, 0);
         locker.collect(address(launchToken), 0x01);
 
-        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 8_000);
+        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 7_500);
     }
 
     function test_FeeSplitIsOwnerOnlyAndRejectsZeroTotal() public {
@@ -281,17 +282,17 @@ contract HydropumpLockerTest is Test {
     }
 
     function test_SplitChangeDoesNotTouchAlreadyCreditedFees() public {
-        _fund(1, 11_000, 0);
+        _fund(1, 10_000, 0);
         locker.collect(address(launchToken), 0x01);
 
         vm.prank(owner);
         locker.setFeeSplit(0, 1); // everything to the protocol from here on
 
-        _fund(2, 11_000, 0);
+        _fund(2, 10_000, 0);
         locker.collect(address(launchToken), 0x02);
 
-        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 8_000, "earlier credit stands");
-        assertEq(launchToken.balanceOf(buyback), 3_000 + 11_000);
+        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 7_500, "earlier credit stands");
+        assertEq(locker.protocolOwed(address(launchToken)), 2_500 + 10_000);
     }
 
     function test_RoundingDustFavoursTheProtocol() public {
@@ -300,7 +301,7 @@ contract HydropumpLockerTest is Test {
         locker.collect(address(launchToken), 0x01);
 
         assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 0);
-        assertEq(launchToken.balanceOf(buyback), 1);
+        assertEq(locker.protocolOwed(address(launchToken)), 1);
     }
 
     // =============================
@@ -308,35 +309,226 @@ contract HydropumpLockerTest is Test {
     // =============================
 
     function test_ClaimPaysCreatorRecipientAndZeroesOwed() public {
-        _fund(1, 11_000, 11_000);
+        _fund(1, 10_000, 10_000);
         locker.collect(address(launchToken), 0x01);
 
         locker.claim(address(launchToken));
 
-        assertEq(launchToken.balanceOf(creatorRecipient), 8_000);
-        assertEq(quote.balanceOf(creatorRecipient), 8_000);
+        assertEq(launchToken.balanceOf(creatorRecipient), 7_500);
+        assertEq(quote.balanceOf(creatorRecipient), 7_500);
         assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 0);
         assertEq(locker.creatorOwed(address(launchToken), address(quote)), 0);
     }
 
     function test_ClaimIsPermissionless() public {
-        _fund(1, 11_000, 0);
+        _fund(1, 10_000, 0);
         locker.collect(address(launchToken), 0x01);
 
         vm.prank(stranger);
         locker.claim(address(launchToken));
 
-        assertEq(launchToken.balanceOf(creatorRecipient), 8_000);
+        assertEq(launchToken.balanceOf(creatorRecipient), 7_500);
         assertEq(launchToken.balanceOf(stranger), 0);
     }
 
+    /// Fees live in two places — credited on the locker, or still sitting in the positions — and a creator
+    /// should not have to know which. `claim` sweeps first, so one call is always enough.
+    function test_ClaimCollectsFirstSoUncollectedFeesNeedNoSeparateCall() public {
+        _fund(1, 10_000, 10_000);
+        _fund(2, 6_000, 2_000);
+
+        // No collect() anywhere: everything is still owed by the position manager.
+        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 0);
+        assertEq(locker.creatorOwed(address(launchToken), address(quote)), 0);
+
+        locker.claim(address(launchToken));
+
+        assertEq(launchToken.balanceOf(creatorRecipient), 12_000, "75% of 16,000");
+        assertEq(quote.balanceOf(creatorRecipient), 9_000, "75% of 12,000");
+        assertEq(locker.protocolOwed(address(launchToken)), 4_000, "protocol share credited, not pushed");
+        assertEq(locker.protocolOwed(address(quote)), 3_000);
+    }
+
+    /// The collect inside `claim` pays the protocol share inline, so a blocked or reverting fee recipient
+    /// takes `claim` with it. That must fail loudly, not silently pay nothing.
+    function test_ClaimRevertsRatherThanSilentlySkippingAFailedCollect() public {
+        _fund(1, 10_000, 0);
+        vm.mockCallRevert(NPM, abi.encodeWithSelector(INonfungiblePositionManager.collect.selector), "nope");
+
+        vm.expectRevert();
+        locker.claim(address(launchToken));
+    }
+
+    /// ...and the creator can still withdraw what is already credited while the owner repoints the recipient.
+    function test_ClaimCreditedStillPaysOutWhenCollectIsBroken() public {
+        _fund(1, 10_000, 0);
+        locker.collect(address(launchToken), 0x01);
+        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 7_500);
+
+        vm.mockCallRevert(NPM, abi.encodeWithSelector(INonfungiblePositionManager.collect.selector), "nope");
+
+        locker.claimCredited(address(launchToken));
+
+        assertEq(launchToken.balanceOf(creatorRecipient), 7_500, "credited balance still reachable");
+        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 0);
+    }
+
+    /// `claim` must have no cheap success path. eth_estimateGas binary-searches for the lowest gas that
+    /// succeeds, so if starving the collect still produced a successful claim, wallets would settle on that
+    /// limit and every claim would silently pay nothing.
+    function test_ClaimHasNoCheapSuccessPathForGasEstimationToFind() public {
+        _fund(1, 10_000, 10_000);
+
+        // Enough gas to enter claim, nowhere near enough to collect five positions.
+        (bool ok,) = address(locker).call{gas: 80_000}(abi.encodeCall(HydropumpLocker.claim, (address(launchToken))));
+        assertFalse(ok, "a starved claim must revert, never succeed having paid nothing");
+
+        locker.claim(address(launchToken));
+        assertEq(launchToken.balanceOf(creatorRecipient), 7_500, "and with real gas it pays in full");
+    }
+
     function test_ClaimTwiceIsANoop() public {
-        _fund(1, 11_000, 0);
+        _fund(1, 10_000, 0);
         locker.collect(address(launchToken), 0x01);
         locker.claim(address(launchToken));
         locker.claim(address(launchToken));
 
-        assertEq(launchToken.balanceOf(creatorRecipient), 8_000);
+        assertEq(launchToken.balanceOf(creatorRecipient), 7_500);
+    }
+
+    // =============================
+    //  LIFETIME TOTALS
+    // =============================
+
+    function test_LifetimeFeesAccumulateGrossAcrossCollects() public {
+        _fund(1, 10_000, 4_000);
+        locker.collect(address(launchToken), 0x01);
+
+        (uint128 gross0, uint128 gross1) = locker.lifetimeFees(address(launchToken));
+        assertEq(gross0, 10_000, "gross, before the split");
+        assertEq(gross1, 4_000);
+
+        _fund(2, 6_000, 1_000);
+        locker.collect(address(launchToken), 0x02);
+
+        (gross0, gross1) = locker.lifetimeFees(address(launchToken));
+        assertEq(gross0, 16_000);
+        assertEq(gross1, 5_000);
+    }
+
+    /// The whole point: claiming empties `creatorOwed`, so without this the number a launch has earned is
+    /// gone from state entirely.
+    function test_LifetimeFeesSurviveClaiming() public {
+        _fund(1, 10_000, 0);
+        locker.claim(address(launchToken));
+
+        assertEq(locker.creatorOwed(address(launchToken), address(launchToken)), 0, "claim zeroed the balance");
+        (uint128 gross0,) = locker.lifetimeFees(address(launchToken));
+        assertEq(gross0, 10_000, "but the lifetime total remains");
+    }
+
+    function test_LifetimeFeesAreUntouchedBySweepingOrSplitChanges() public {
+        _fund(1, 8_000, 0);
+        locker.collect(address(launchToken), 0x01);
+
+        address[] memory assets = new address[](1);
+        assets[0] = address(launchToken);
+        locker.sweepProtocol(assets);
+        vm.prank(owner);
+        locker.setFeeSplit(1, 1);
+
+        (uint128 gross0,) = locker.lifetimeFees(address(launchToken));
+        assertEq(gross0, 8_000, "gross is independent of how it was divided or where it went");
+    }
+
+    // =============================
+    //  PROTOCOL SWEEP
+    // =============================
+
+    function test_SweepProtocolMovesCreditedSharesToTheRecipient() public {
+        _fund(1, 10_000, 8_000);
+        locker.collect(address(launchToken), 0x01);
+
+        address[] memory assets = new address[](2);
+        (assets[0], assets[1]) = (address(launchToken), address(quote));
+        uint256[] memory swept = locker.sweepProtocol(assets);
+
+        assertEq(swept[0], 2_500);
+        assertEq(swept[1], 2_000);
+        assertEq(launchToken.balanceOf(buyback), 2_500);
+        assertEq(quote.balanceOf(buyback), 2_000);
+        assertEq(locker.protocolOwed(address(launchToken)), 0);
+        assertEq(locker.protocolOwed(address(quote)), 0);
+    }
+
+    /// The buyback job runs on the operator's schedule, so a sweep batches whatever has piled up since the
+    /// last one, across every launch that produced that asset.
+    function test_SweepProtocolPoolsAcrossLaunchesAndCycles() public {
+        MockERC20 second = new MockERC20("Beta", "BETA");
+        uint256[] memory otherIds = new uint256[](1);
+        otherIds[0] = 99;
+        vm.prank(launcher);
+        locker.registerLaunch(address(second), address(quote), makeAddr("pool2"), creator, creatorRecipient, otherIds);
+        npm.setPair(address(second), address(quote));
+
+        _fund(1, 0, 4_000);
+        locker.collect(address(launchToken), 0x01);
+        quote.mint(NPM, 8_000);
+        npm.setOwed(99, 0, 8_000);
+        locker.collect(address(second), 0x01);
+
+        assertEq(locker.protocolOwed(address(quote)), 3_000, "both launches pooled into one balance");
+
+        address[] memory assets = new address[](1);
+        assets[0] = address(quote);
+        locker.sweepProtocol(assets);
+        assertEq(quote.balanceOf(buyback), 3_000);
+
+        // Next cycle accrues from zero again.
+        quote.mint(NPM, 4_000);
+        npm.setOwed(1, 0, 4_000);
+        locker.collect(address(launchToken), 0x01);
+        assertEq(locker.protocolOwed(address(quote)), 1_000);
+    }
+
+    function test_SweepProtocolIsPermissionlessAndSkipsEmptyAssets() public {
+        _fund(1, 10_000, 0);
+        locker.collect(address(launchToken), 0x01);
+
+        address[] memory assets = new address[](2);
+        (assets[0], assets[1]) = (address(quote), address(launchToken));
+
+        vm.prank(stranger);
+        uint256[] memory swept = locker.sweepProtocol(assets);
+
+        assertEq(swept[0], 0, "nothing owed in quote");
+        assertEq(swept[1], 2_500);
+        assertEq(launchToken.balanceOf(stranger), 0, "caller gets nothing; destination is fixed");
+    }
+
+    /// The point of crediting rather than pushing: a protocol-side problem can never stop a creator being
+    /// paid, and a creator-side one can never stop the buyback.
+    function test_ProtocolAndCreatorPayoutsCannotBlockEachOther() public {
+        _fund(1, 10_000, 0);
+
+        // The buyback cannot receive this asset at all.
+        launchToken.setBlocked(buyback, true);
+
+        // A creator claims anyway — collect credits, and the only transfer is to their own recipient.
+        locker.claim(address(launchToken));
+        assertEq(launchToken.balanceOf(creatorRecipient), 7_500);
+
+        // The protocol share is safe in the ledger until the recipient can take it.
+        assertEq(locker.protocolOwed(address(launchToken)), 2_500);
+        address[] memory assets = new address[](1);
+        assets[0] = address(launchToken);
+        vm.expectRevert();
+        locker.sweepProtocol(assets);
+
+        vm.prank(owner);
+        locker.setProtocolFeeRecipient(makeAddr("rescue"));
+        locker.sweepProtocol(assets);
+        assertEq(launchToken.balanceOf(makeAddr("rescue")), 2_500);
     }
 
     function test_OnlyCurrentRecipientCanRedirect() public {
@@ -353,11 +545,11 @@ contract HydropumpLockerTest is Test {
         vm.prank(creatorRecipient);
         locker.setCreatorRecipient(address(launchToken), stranger);
 
-        _fund(1, 11_000, 0);
+        _fund(1, 10_000, 0);
         locker.collect(address(launchToken), 0x01);
         locker.claim(address(launchToken));
 
-        assertEq(launchToken.balanceOf(stranger), 8_000);
+        assertEq(launchToken.balanceOf(stranger), 7_500);
         assertEq(launchToken.balanceOf(creatorRecipient), 0);
     }
 
@@ -403,6 +595,12 @@ contract HydropumpLockerTest is Test {
 
         assertEq(locker.launcher(), stranger);
         assertEq(locker.protocolFeeRecipient(), stranger);
+    }
+
+    function test_ImplementationCannotBeInitialized() public {
+        HydropumpLocker impl = new HydropumpLocker();
+        vm.expectRevert();
+        impl.initialize(owner, launcher, buyback, uint64(7_500), uint64(2_500));
     }
 
     function test_UpgradeIsOwnerOnly() public {

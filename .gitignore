@@ -5,3 +5,8 @@ node_modules
 /cache_forge
 /out
 /broadcast
+
+/frontend/dist
+/frontend/.env
+/frontend/.env.local
+/frontend

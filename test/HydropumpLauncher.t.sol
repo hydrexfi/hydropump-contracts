@@ -17,13 +17,16 @@ contract HydropumpLauncherTest is Test {
     address internal stranger = makeAddr("stranger");
 
     address internal constant WETH = HydropumpAddresses.WETH;
+    uint96 internal constant LAUNCH_FEE = 0.0005 ether;
 
     function setUp() public {
+        vm.deal(creator, 1 ether);
+        vm.deal(stranger, 1 ether);
         launcher = HydropumpLauncher(
             address(
                 new ERC1967Proxy(
                     address(new HydropumpLauncher()),
-                    abi.encodeCall(HydropumpLauncher.initialize, (owner, admin, locker))
+                    abi.encodeCall(HydropumpLauncher.initialize, (owner, admin, locker, LAUNCH_FEE))
                 )
             )
         );
@@ -91,7 +94,7 @@ contract HydropumpLauncherTest is Test {
 
         vm.prank(creator);
         vm.expectRevert(HydropumpLauncher.TokenNotBelowQuote.selector);
-        launcher.launch(_params(salt));
+        launcher.launch{value: LAUNCH_FEE}(_params(salt));
     }
 
     function test_SaltIsBoundToTheSender() public {
@@ -111,7 +114,7 @@ contract HydropumpLauncherTest is Test {
         }
         vm.prank(stranger);
         vm.expectRevert(HydropumpLauncher.TokenNotBelowQuote.selector);
-        launcher.launch(_params(exclusive));
+        launcher.launch{value: LAUNCH_FEE}(_params(exclusive));
     }
 
     // =============================
@@ -125,7 +128,7 @@ contract HydropumpLauncherTest is Test {
 
         vm.prank(creator);
         vm.expectRevert(HydropumpLauncher.QuoteTokenNotEnabled.selector);
-        launcher.launch(params);
+        launcher.launch{value: LAUNCH_FEE}(params);
     }
 
     function test_ConfigureQuoteTokenIsOwnerOnly() public {
@@ -237,29 +240,36 @@ contract HydropumpLauncherTest is Test {
         vm.startPrank(owner);
         launcher.configureQuoteTokens(_one(WETH), _one(true), _oneTick(-228_000));
         launcher.setStartTicks(_one(WETH), _oneTick(-228_400));
-        launcher.setLocker(stranger);
         vm.stopPrank();
 
         (, int24 tick,) = launcher.quoteTokens(WETH);
         assertEq(tick, -228_400);
+    }
+
+    /// Repointing the locker redirects every future launch's liquidity, so the hot key must not hold it.
+    function test_OnlyAdminCanRepointTheLocker() public {
+        vm.prank(owner);
+        vm.expectRevert(HydropumpLauncher.NotAdmin.selector);
+        launcher.setLocker(stranger);
+
+        vm.prank(stranger);
+        vm.expectRevert(HydropumpLauncher.NotAdmin.selector);
+        launcher.setLocker(stranger);
+
+        vm.prank(admin);
+        launcher.setLocker(stranger);
         assertEq(launcher.locker(), stranger);
     }
 
     function test_ImplementationCannotBeInitialized() public {
         HydropumpLauncher impl = new HydropumpLauncher();
         vm.expectRevert();
-        impl.initialize(owner, admin, locker);
+        impl.initialize(owner, admin, locker, LAUNCH_FEE);
     }
 
     function _params(bytes32 salt) internal view returns (HydropumpLauncher.LaunchParams memory) {
         return HydropumpLauncher.LaunchParams({
-            name: "Alpha",
-            symbol: "ALPHA",
-            metadataURI: "ipfs://alpha",
-            quoteToken: WETH,
-            userSalt: salt,
-            creatorRecipient: creator,
-            buyAmount: 0
+            name: "Alpha", symbol: "ALPHA", quoteToken: WETH, userSalt: salt, creatorRecipient: creator, buyAmount: 0
         });
     }
 

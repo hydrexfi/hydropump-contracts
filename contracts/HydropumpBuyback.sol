@@ -9,7 +9,8 @@ import {IBribe} from "./interfaces/IBribe.sol";
 import {HydropumpAddresses} from "./libraries/HydropumpAddresses.sol";
 
 /// @title HydropumpBuyback
-/// @notice Receives the protocol's 0.3% from the locker, buys HYDX with it, and bribes the Hydropump gauge.
+/// @notice Receives the protocol's share of launch fees from the locker, buys HYDX with it, and bribes
+///         the Hydropump gauge.
 contract HydropumpBuyback is Ownable2Step {
     using SafeERC20 for IERC20;
 

@@ -35,6 +35,7 @@ contract LaunchCurveForkTest is Test {
 
     string internal quotesJson;
     uint256 internal saltCursor;
+    uint96 internal constant LAUNCH_FEE = 0.0005 ether;
     bool internal forked;
 
     struct Quote {
@@ -50,6 +51,7 @@ contract LaunchCurveForkTest is Test {
         if (bytes(rpc).length == 0) return;
         vm.createSelectFork(rpc);
         forked = true;
+        vm.deal(creator, 100 ether);
 
         quotesJson = vm.readFile("script/quotes/quote-tokens.json");
 
@@ -58,7 +60,7 @@ contract LaunchCurveForkTest is Test {
                 new ERC1967Proxy(
                     address(new HydropumpLocker()),
                     abi.encodeCall(
-                        HydropumpLocker.initialize, (owner, address(0), buyback, uint64(8_000), uint64(3_000))
+                        HydropumpLocker.initialize, (owner, address(0), buyback, uint64(7_500), uint64(2_500))
                     )
                 )
             )
@@ -67,7 +69,7 @@ contract LaunchCurveForkTest is Test {
             address(
                 new ERC1967Proxy(
                     address(new HydropumpLauncher()),
-                    abi.encodeCall(HydropumpLauncher.initialize, (owner, owner, address(locker)))
+                    abi.encodeCall(HydropumpLauncher.initialize, (owner, owner, address(locker), LAUNCH_FEE))
                 )
             )
         );
@@ -136,11 +138,10 @@ contract LaunchCurveForkTest is Test {
         }
 
         vm.prank(creator);
-        (token, pool, positionIds) = launcher.launch(
+        (token, pool, positionIds) = launcher.launch{value: LAUNCH_FEE}(
             HydropumpLauncher.LaunchParams({
                 name: "Alpha",
                 symbol: "ALPHA",
-                metadataURI: "",
                 quoteToken: q.token,
                 userSalt: salt,
                 creatorRecipient: creator,
@@ -291,13 +292,22 @@ contract LaunchCurveForkTest is Test {
         assertGt(owed.quoteAmount, 0, "creator owed quote fees");
         assertGt(owed.launchTokenAmount, 0, "creator owed launch-token fees from the sell");
 
-        uint256 buybackQuote = IERC20(q.token).balanceOf(buyback);
-        uint256 buybackToken = IERC20(token).balanceOf(buyback);
-        assertGt(buybackQuote, 0, "protocol share must reach the buyback");
+        // Collect credits the protocol share rather than pushing it, so the buyback holds nothing yet.
+        uint256 buybackQuote = locker.protocolOwed(q.token);
+        uint256 buybackToken = locker.protocolOwed(token);
+        assertGt(buybackQuote, 0, "protocol share must be credited");
+        assertEq(IERC20(q.token).balanceOf(buyback), 0, "and must not have moved on its own");
 
-        // 0.8 / 0.3 split, within a wei of rounding.
-        assertApproxEqAbs(owed.quoteAmount * 3, buybackQuote * 8, 8);
-        assertApproxEqAbs(owed.launchTokenAmount * 3, buybackToken * 8, 8);
+        // 75 / 25 split, within a wei of rounding.
+        assertApproxEqAbs(owed.quoteAmount, buybackQuote * 3, 8);
+        assertApproxEqAbs(owed.launchTokenAmount, buybackToken * 3, 8);
+
+        // It reaches the buyback when the operator sweeps, on their own schedule.
+        address[] memory assets = new address[](2);
+        (assets[0], assets[1]) = (q.token, token);
+        locker.sweepProtocol(assets);
+        assertEq(IERC20(q.token).balanceOf(buyback), buybackQuote, "sweep delivers the quote share");
+        assertEq(IERC20(token).balanceOf(buyback), buybackToken, "and the launch-token share");
 
         locker.claim(token);
         assertEq(IERC20(q.token).balanceOf(creator), owed.quoteAmount);
@@ -354,11 +364,10 @@ contract LaunchCurveForkTest is Test {
             bytes32 salt = _mineSalt(creator, q.token);
 
             vm.prank(creator);
-            try launcher.launch(
+            try launcher.launch{value: LAUNCH_FEE}(
                 HydropumpLauncher.LaunchParams({
                     name: "Alpha",
                     symbol: "ALPHA",
-                    metadataURI: "",
                     quoteToken: q.token,
                     userSalt: salt,
                     creatorRecipient: creator,
@@ -403,6 +412,48 @@ contract LaunchCurveForkTest is Test {
             console2.log(string.concat("  ", q.symbol, " FDV $"), fdv);
             assertApproxEqRel(fdv, TARGET_FDV_USD, 0.02e18, q.symbol);
         }
+    }
+
+    /// Documents what a launch pool actually charges today. The split is a ratio applied to whatever is
+    /// collected, so it holds at any pool fee — but the absolute amounts scale with it.
+    function test_EffectivePoolFeeAndSplitAreIndependent() public {
+        if (!forked) {
+            vm.skip(true);
+        }
+
+        Quote memory q = _quote("WETH");
+        (address token, address pool,) = _launch(q, 0);
+
+        uint16 feeAtLaunch = IAlgebraPool(pool).fee();
+        (,,, uint16 pluginConfig,,) = IAlgebraPool(pool).globalState();
+
+        uint256 amountIn = 1 ether;
+        _swapIn(alice, q.token, token, amountIn);
+        uint16 feeAfterSwap = IAlgebraPool(pool).fee();
+
+        (, uint256[] memory fees1) = locker.collect(token, locker.fullMask(token));
+        uint256 quoteFees;
+        for (uint256 i = 0; i < fees1.length; i++) {
+            quoteFees += fees1[i];
+        }
+
+        // Hundredths of a bip, denominator 1e6 — the same units as the pool fee.
+        uint256 effectiveFee = (quoteFees * 1e6) / amountIn;
+
+        console2.log("pool.fee() at launch     ", uint256(feeAtLaunch));
+        console2.log("pool.fee() after a swap  ", uint256(feeAfterSwap));
+        console2.log("pluginConfig             ", uint256(pluginConfig));
+        console2.log("effective fee taken      ", effectiveFee);
+        console2.log("target once set static   ", uint256(11_000));
+
+        assertEq(pluginConfig & 128, 128, "DYNAMIC_FEE is on, so the plugin owns the fee");
+        assertLt(effectiveFee, 11_000, "today the pool charges far less than the intended 1.1%");
+
+        // Whatever the pool charged, the split of it is exact.
+        HydropumpLocker.ClaimableFees memory owed = locker.claimable(token);
+        uint256 protocolShare = locker.protocolOwed(q.token);
+        assertApproxEqAbs(owed.quoteAmount, protocolShare * 3, 8);
+        assertApproxEqAbs(owed.quoteAmount + protocolShare, quoteFees, 2);
     }
 
     function test_RoundTripSellReturnsQuote() public {

@@ -29,6 +29,8 @@ contract HydropumpLaunchForkTest is Test {
     address internal creator = makeAddr("creator");
     address internal buyback = makeAddr("buyback");
 
+    uint96 internal constant LAUNCH_FEE = 0.0005 ether;
+    uint256 internal saltCursor;
     bool internal forked;
 
     function setUp() public {
@@ -36,13 +38,14 @@ contract HydropumpLaunchForkTest is Test {
         if (bytes(rpc).length == 0) return;
         vm.createSelectFork(rpc);
         forked = true;
+        vm.deal(creator, 100 ether);
 
         locker = HydropumpLocker(
             address(
                 new ERC1967Proxy(
                     address(new HydropumpLocker()),
                     abi.encodeCall(
-                        HydropumpLocker.initialize, (owner, address(0), buyback, uint64(8_000), uint64(3_000))
+                        HydropumpLocker.initialize, (owner, address(0), buyback, uint64(7_500), uint64(2_500))
                     )
                 )
             )
@@ -51,7 +54,7 @@ contract HydropumpLaunchForkTest is Test {
             address(
                 new ERC1967Proxy(
                     address(new HydropumpLauncher()),
-                    abi.encodeCall(HydropumpLauncher.initialize, (owner, owner, address(locker)))
+                    abi.encodeCall(HydropumpLauncher.initialize, (owner, owner, address(locker), LAUNCH_FEE))
                 )
             )
         );
@@ -66,10 +69,15 @@ contract HydropumpLaunchForkTest is Test {
         vm.stopPrank();
     }
 
-    function _mineSalt(address deployer) internal view returns (bytes32 salt) {
-        for (uint256 i = 0; i < 20_000; i++) {
+    /// @dev Advances a cursor: CREATE2 is deterministic, so reusing a salt resolves to an address that
+    ///      already has a token deployed at it.
+    function _mineSalt(address deployer) internal returns (bytes32 salt) {
+        for (uint256 i = saltCursor; i < saltCursor + 20_000; i++) {
             salt = bytes32(i);
-            if (launcher.isSaltValid(deployer, salt, WETH)) return salt;
+            if (launcher.isSaltValid(deployer, salt, WETH)) {
+                saltCursor = i + 1;
+                return salt;
+            }
         }
         revert("no salt found");
     }
@@ -82,11 +90,10 @@ contract HydropumpLaunchForkTest is Test {
         bytes32 salt = _mineSalt(creator);
 
         vm.prank(creator);
-        (address token, address pool, uint256[] memory positionIds) = launcher.launch(
+        (address token, address pool, uint256[] memory positionIds) = launcher.launch{value: LAUNCH_FEE}(
             HydropumpLauncher.LaunchParams({
                 name: "Alpha",
                 symbol: "ALPHA",
-                metadataURI: "ipfs://alpha",
                 quoteToken: WETH,
                 userSalt: salt,
                 creatorRecipient: creator,
@@ -159,11 +166,10 @@ contract HydropumpLaunchForkTest is Test {
 
         vm.startPrank(creator);
         IERC20(WETH).approve(address(launcher), buyAmount);
-        (address token, address pool,) = launcher.launch(
+        (address token, address pool,) = launcher.launch{value: LAUNCH_FEE}(
             HydropumpLauncher.LaunchParams({
                 name: "Alpha",
                 symbol: "ALPHA",
-                metadataURI: "",
                 quoteToken: WETH,
                 userSalt: salt,
                 creatorRecipient: creator,
@@ -188,11 +194,10 @@ contract HydropumpLaunchForkTest is Test {
 
         bytes32 salt = _mineSalt(creator);
         vm.prank(creator);
-        (address token, address pool,) = launcher.launch(
+        (address token, address pool,) = launcher.launch{value: LAUNCH_FEE}(
             HydropumpLauncher.LaunchParams({
                 name: "Alpha",
                 symbol: "ALPHA",
-                metadataURI: "",
                 quoteToken: WETH,
                 userSalt: salt,
                 creatorRecipient: creator,
@@ -207,6 +212,46 @@ contract HydropumpLaunchForkTest is Test {
         assertEq(tickAfter, WETH_START_TICK);
     }
 
+    function test_LaunchFeeAccumulatesAndIsClaimable() public {
+        if (!forked) {
+            vm.skip(true);
+        }
+
+        bytes32 salt = _mineSalt(creator);
+        vm.prank(creator);
+        launcher.launch{value: LAUNCH_FEE}(
+            HydropumpLauncher.LaunchParams({
+                name: "Alpha",
+                symbol: "ALPHA",
+                quoteToken: WETH,
+                userSalt: salt,
+                creatorRecipient: creator,
+                buyAmount: 0
+            })
+        );
+
+        assertEq(address(launcher).balance, LAUNCH_FEE, "fee stays in the launcher");
+
+        // Overpayment is accepted and kept, not refunded.
+        uint256 surplus = 0.002 ether;
+        bytes32 salt2 = _mineSalt(creator);
+        vm.prank(creator);
+        launcher.launch{value: LAUNCH_FEE + surplus}(
+            HydropumpLauncher.LaunchParams({
+                name: "Beta", symbol: "BETA", quoteToken: WETH, userSalt: salt2, creatorRecipient: creator, buyAmount: 0
+            })
+        );
+        assertEq(address(launcher).balance, LAUNCH_FEE * 2 + surplus, "surplus is kept");
+
+        address sink = makeAddr("sink");
+        vm.prank(owner);
+        uint256 claimed = launcher.claimLaunchFees(sink);
+
+        assertEq(claimed, LAUNCH_FEE * 2 + surplus);
+        assertEq(sink.balance, LAUNCH_FEE * 2 + surplus);
+        assertEq(address(launcher).balance, 0);
+    }
+
     function test_LaunchPoolIsNotGauged() public {
         if (!forked) {
             vm.skip(true);
@@ -214,11 +259,10 @@ contract HydropumpLaunchForkTest is Test {
 
         bytes32 salt = _mineSalt(creator);
         vm.prank(creator);
-        (, address pool,) = launcher.launch(
+        (, address pool,) = launcher.launch{value: LAUNCH_FEE}(
             HydropumpLauncher.LaunchParams({
                 name: "Alpha",
                 symbol: "ALPHA",
-                metadataURI: "",
                 quoteToken: WETH,
                 userSalt: salt,
                 creatorRecipient: creator,

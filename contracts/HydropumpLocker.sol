@@ -30,6 +30,14 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         uint256 quoteAmount;
     }
 
+    /// @notice Gross fees a launch has ever collected, before the creator/protocol split.
+    /// @dev Packed into one slot, so recording it costs a single SSTORE per `collect`. uint128 holds 3.4e38;
+    ///      an entire 10B/18-decimal supply is 1e28, so the headroom is ten orders of magnitude.
+    struct FeeTotals {
+        uint128 launchToken;
+        uint128 quote;
+    }
+
     struct Launch {
         address quoteToken;
         address pool;
@@ -47,8 +55,17 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     mapping(address token => Launch) internal _launches;
     mapping(address token => mapping(address asset => uint256 amount)) public creatorOwed;
 
+    /// @notice Protocol share awaiting the buyback, per asset. Pooled across launches: it all goes to one
+    ///         place, so there is nothing to gain from tracking which launch produced it.
+    mapping(address asset => uint256 amount) public protocolOwed;
+
+    /// @notice Lifetime gross fees per launch. Kept in storage, unlike the split — which the events already
+    ///         carry — because claiming zeroes `creatorOwed`, so nothing else survives to say what a launch
+    ///         has earned. It is the only honest measure of a launch's real volume, and it is monotonic.
+    mapping(address token => FeeTotals) public lifetimeFees;
+
     /// @dev Reserved so added storage does not shift the layout. Keep vars + gap == 50.
-    uint256[46] private __gap;
+    uint256[44] private __gap;
 
     event LaunchRegistered(
         address indexed token,
@@ -70,6 +87,8 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     );
     event CreatorAccrued(address indexed token, address indexed recipient, address indexed asset, uint256 amount);
     event CreatorClaimed(address indexed token, address indexed recipient, address indexed asset, uint256 amount);
+    event ProtocolAccrued(address indexed asset, uint256 amount);
+    event ProtocolSwept(address indexed recipient, address indexed asset, uint256 amount);
     event CreatorRecipientUpdated(address indexed token, address indexed from, address indexed to);
     event FeeSplitUpdated(uint64 creatorFee, uint64 protocolFee);
     event LauncherUpdated(address indexed previousLauncher, address indexed newLauncher);
@@ -182,7 +201,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         emit LaunchRegistered(token, creator, quoteToken, pool, positionIds, uint64(block.timestamp));
     }
 
-    /// @notice Collect from the masked positions, credit the creator, forward the protocol share.
+    /// @notice Collect from the masked positions and credit both shares. Moves nothing out of the locker.
     /// @param positionMask Bit `i` selects position `i`. Use `fullMask(token)` for all.
     /// @dev Permissionless; destinations are fixed. The keeper `eth_call`s this with the full mask to read
     ///      per-position amounts, then sends a transaction with only the bands worth the gas.
@@ -217,6 +236,12 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
             total1 += amount1;
         }
 
+        if (total0 != 0 || total1 != 0) {
+            FeeTotals storage totals = lifetimeFees[token];
+            totals.launchToken += uint128(total0);
+            totals.quote += uint128(total1);
+        }
+
         // The launch token is always token0 — the launcher mines for it.
         (uint256 creator0, uint256 protocol0) = _distribute(token, token, total0);
         (uint256 creator1, uint256 protocol1) = _distribute(token, launch.quoteToken, total1);
@@ -236,14 +261,55 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         return claimable(token);
     }
 
-    /// @notice Send accrued creator fees to the recipient. Permissionless; destination is fixed.
+    /// @notice Sweep the positions and send everything the creator is owed. Permissionless; destination is fixed.
+    /// @dev Collects first so a caller never has to know whether fees are already credited or still sitting in
+    ///      the positions — that distinction is an implementation detail, not something a creator should have
+    ///      to reason about.
+    ///
+    ///      The collect is deliberately NOT wrapped in try/catch. `eth_estimateGas` binary-searches for the
+    ///      cheapest gas at which a call succeeds, so a swallowed failure is a *cheaper success*: the estimator
+    ///      settles on a limit that starves the collect, the catch hides the out-of-gas, and the claim pays
+    ///      nothing while reporting success. Letting it revert keeps estimation honest — there is no cheap
+    ///      path to find.
+    ///
+    ///      Collecting moves no money to anyone but this contract, so the only transfer here is to the
+    ///      creator's own recipient. Nothing the protocol side does can block a creator being paid.
     function claim(address token) external returns (uint256 amount0, uint256 amount1) {
+        uint256 mask = fullMask(token);
+        if (mask != 0) collect(token, mask);
+        return claimCredited(token);
+    }
+
+    /// @notice Pay out only what is already credited, without touching the positions.
+    /// @dev Skips the sweep entirely — useful when the balance is known to be credited already and paying for
+    ///      a five-position collect would be waste, and as a way out should `collect` itself ever revert.
+    function claimCredited(address token) public returns (uint256 amount0, uint256 amount1) {
         Launch storage launch = _launches[token];
         address recipient = launch.creatorRecipient;
         if (recipient == address(0)) revert UnknownLaunch();
 
         amount0 = _payOut(token, token, recipient);
         amount1 = _payOut(token, launch.quoteToken, recipient);
+    }
+
+    /// @notice Move the accrued protocol share to the buyback. Permissionless; destination is fixed.
+    /// @dev Pulled on the operator's schedule rather than pushed during someone else's collect, so the daily
+    ///      buyback job and a creator's claim can never block one another. Assets are passed in because the
+    ///      locker does not enumerate them — the job already knows which it is converting this cycle.
+    function sweepProtocol(address[] calldata assets) external returns (uint256[] memory amounts) {
+        address recipient = protocolFeeRecipient;
+        amounts = new uint256[](assets.length);
+
+        for (uint256 i = 0; i < assets.length; i++) {
+            address asset = assets[i];
+            uint256 amount = protocolOwed[asset];
+            if (amount == 0) continue;
+
+            protocolOwed[asset] = 0;
+            amounts[i] = amount;
+            IERC20(asset).safeTransfer(recipient, amount);
+            emit ProtocolSwept(recipient, asset, amount);
+        }
     }
 
     function setCreatorRecipient(address token, address newRecipient) external {
@@ -277,7 +343,10 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
             creatorOwed[token][asset] += creatorAmount;
             emit CreatorAccrued(token, _launches[token].creatorRecipient, asset, creatorAmount);
         }
-        if (protocolAmount > 0) IERC20(asset).safeTransfer(protocolFeeRecipient, protocolAmount);
+        if (protocolAmount > 0) {
+            protocolOwed[asset] += protocolAmount;
+            emit ProtocolAccrued(asset, protocolAmount);
+        }
     }
 
     function _payOut(address token, address asset, address recipient) internal returns (uint256 amount) {

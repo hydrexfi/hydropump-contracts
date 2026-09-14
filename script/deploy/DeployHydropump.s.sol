@@ -17,8 +17,9 @@ import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.s
 ///      The locker and launcher reference each other, so the locker goes up under the deployer, gets wired,
 ///      and is then handed to the admin.
 contract DeployHydropump is Script {
-    uint64 internal constant CREATOR_FEE = 8_000; // 0.8% of the 1.1% pool fee
-    uint64 internal constant PROTOCOL_FEE = 3_000; // 0.3%
+    uint64 internal constant CREATOR_FEE = 7_500; // 75% of collected fees
+    uint64 internal constant PROTOCOL_FEE = 2_500; // 25%, funds the HYDX buyback
+    uint96 internal constant LAUNCH_FEE = 0.00001 ether; // anti-spam, claimable by the admin
 
     function run() public {
         uint256 deployerKey = vm.envUint("DEPLOYER_KEY");
@@ -49,7 +50,7 @@ contract DeployHydropump is Script {
             address(
                 new ERC1967Proxy(
                     address(new HydropumpLauncher()),
-                    abi.encodeCall(HydropumpLauncher.initialize, (deployer, admin, address(locker)))
+                    abi.encodeCall(HydropumpLauncher.initialize, (deployer, admin, address(locker), LAUNCH_FEE))
                 )
             )
         );
@@ -63,6 +64,7 @@ contract DeployHydropump is Script {
         console2.log("HydropumpLauncher:", address(launcher));
         console2.log("HydropumpLocker:  ", address(locker));
         console2.log("HydropumpBuyback: ", address(buyback));
+        console2.log("Launch fee (wei):  ", uint256(LAUNCH_FEE));
         console2.log("\nSet LAUNCHER_ADDRESS in .env, then: npm run quotes:build && npm run quotes:register:base");
         console2.log("From the Safe: accept the locker ownership transfer (Ownable2Step).");
     }
