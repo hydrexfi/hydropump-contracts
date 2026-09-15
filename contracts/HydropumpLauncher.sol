@@ -11,6 +11,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 
 import {HydropumpToken} from "./HydropumpToken.sol";
 import {HydropumpAutoLP} from "./HydropumpAutoLP.sol";
+import {HydropumpStakingRewards} from "./HydropumpStakingRewards.sol";
 import {IHydropumpLocker} from "./interfaces/IHydropumpLocker.sol";
 import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionManager.sol";
 import {IAlgebraPool} from "./interfaces/IAlgebraPool.sol";
@@ -31,6 +32,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
 
     uint256 public constant SUPPLY = 10_000_000_000e18;
     uint8 public constant AUTO_LP_ROUTE = 1;
+    uint8 public constant STAKING_REWARDS_ROUTE = 2;
 
     struct PendingToken {
         string name;
@@ -72,9 +74,11 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
 
     /// @notice Implementation cloned for launches that allocate fees to active-band auto-LP.
     address public autoLpImplementation;
+    /// @notice Implementation cloned for per-launch staking reward groups.
+    address public stakingRewardsImplementation;
 
     /// @dev Reserved so added storage does not shift the layout. Keep vars + gap == 50.
-    uint256[42] private __gap;
+    uint256[41] private __gap;
 
     event Launched(
         address indexed token,
@@ -95,7 +99,13 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     event AdminUpdated(address indexed previousAdmin, address indexed newAdmin);
     event LockerUpdated(address indexed previousLocker, address indexed newLocker);
     event AutoLpImplementationUpdated(address indexed previousImplementation, address indexed newImplementation);
+    event StakingRewardsImplementationUpdated(
+        address indexed previousImplementation, address indexed newImplementation
+    );
     event AutoLpDeployed(address indexed token, address indexed strategy, uint64 allocationBps);
+    event StakingRewardsDeployed(
+        address indexed token, address indexed strategy, uint64 allocationBps, uint64 minStakeDuration
+    );
 
     error QuoteTokenNotEnabled();
     error TokenNotBelowQuote();
@@ -108,7 +118,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     error TransferFailed();
     error TokenAddressMismatch();
     error QuoteConsumed();
-    error AutoLpNotConfigured();
+    error StrategyNotConfigured();
     error UnsupportedFeeRoute();
     error DuplicateFeeRoute();
     error InvalidFeeRouteConfig();
@@ -126,11 +136,13 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         address _admin,
         address _locker,
         address _autoLpImplementation,
+        address _stakingRewardsImplementation,
         uint96 _launchFee
     ) external initializer {
         if (
             _owner == address(0) || _admin == address(0) || _locker == address(0) || _autoLpImplementation == address(0)
-                || _autoLpImplementation.code.length == 0
+                || _autoLpImplementation.code.length == 0 || _stakingRewardsImplementation == address(0)
+                || _stakingRewardsImplementation.code.length == 0
         ) revert ZeroAddress();
         __Ownable_init(_owner);
         __Ownable2Step_init();
@@ -138,11 +150,13 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         admin = _admin;
         locker = _locker;
         autoLpImplementation = _autoLpImplementation;
+        stakingRewardsImplementation = _stakingRewardsImplementation;
         launchFee = _launchFee;
 
         emit AdminUpdated(address(0), _admin);
         emit LockerUpdated(address(0), _locker);
         emit AutoLpImplementationUpdated(address(0), _autoLpImplementation);
+        emit StakingRewardsImplementationUpdated(address(0), _stakingRewardsImplementation);
         emit LaunchFeeUpdated(0, _launchFee);
     }
 
@@ -204,7 +218,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         payable
         returns (address token, address pool, uint256[] memory positionIds)
     {
-        return _launch(params, 0);
+        return _launch(params, 0, 0, 0);
     }
 
     /// @notice Launch with one or more built-in uses of the creator-controlled fee share.
@@ -214,17 +228,28 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         returns (address token, address pool, uint256[] memory positionIds)
     {
         uint64 autoLpBps;
+        uint64 stakingRewardsBps;
+        uint64 minStakeDuration;
         for (uint256 i = 0; i < routes.length; i++) {
             FeeRouteConfig calldata route = routes[i];
-            if (route.routeType != AUTO_LP_ROUTE) revert UnsupportedFeeRoute();
-            if (autoLpBps != 0) revert DuplicateFeeRoute();
-            if (route.bps == 0 || route.config.length != 0) revert InvalidFeeRouteConfig();
-            autoLpBps = route.bps;
+            if (route.bps == 0) revert InvalidFeeRouteConfig();
+            if (route.routeType == AUTO_LP_ROUTE) {
+                if (autoLpBps != 0) revert DuplicateFeeRoute();
+                if (route.config.length != 0) revert InvalidFeeRouteConfig();
+                autoLpBps = route.bps;
+            } else if (route.routeType == STAKING_REWARDS_ROUTE) {
+                if (stakingRewardsBps != 0) revert DuplicateFeeRoute();
+                if (route.config.length != 32) revert InvalidFeeRouteConfig();
+                stakingRewardsBps = route.bps;
+                minStakeDuration = abi.decode(route.config, (uint64));
+            } else {
+                revert UnsupportedFeeRoute();
+            }
         }
-        return _launch(params, autoLpBps);
+        return _launch(params, autoLpBps, stakingRewardsBps, minStakeDuration);
     }
 
-    function _launch(LaunchParams calldata params, uint64 autoLpBps)
+    function _launch(LaunchParams calldata params, uint64 autoLpBps, uint64 stakingRewardsBps, uint64 minStakeDuration)
         internal
         returns (address token, address pool, uint256[] memory positionIds)
     {
@@ -255,23 +280,41 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         if (params.buyAmount > 0) _buy(token, params.quoteToken, params.buyAmount);
 
         address creatorRecipient = params.creatorRecipient == address(0) ? msg.sender : params.creatorRecipient;
-        if (autoLpBps == 0) {
+        if (autoLpBps == 0 && stakingRewardsBps == 0) {
             IHydropumpLocker(locker).registerLaunch(
                 token, params.quoteToken, pool, msg.sender, creatorRecipient, positionIds
             );
         } else {
-            address implementation = autoLpImplementation;
-            if (implementation == address(0)) revert AutoLpNotConfigured();
-            address strategy = Clones.clone(implementation);
-            HydropumpAutoLP(strategy).initialize(
-                token, params.quoteToken, pool, locker, address(IHydropumpLocker(locker).feeEscrow()), admin, owner()
-            );
-            IHydropumpLocker.FeeRoute[] memory routes = new IHydropumpLocker.FeeRoute[](1);
-            routes[0] = IHydropumpLocker.FeeRoute({routeType: AUTO_LP_ROUTE, bps: autoLpBps, strategy: strategy});
+            uint256 routeCount = (autoLpBps == 0 ? 0 : 1) + (stakingRewardsBps == 0 ? 0 : 1);
+            IHydropumpLocker.FeeRoute[] memory routes = new IHydropumpLocker.FeeRoute[](routeCount);
+            uint256 routeIndex;
+            address escrow = address(IHydropumpLocker(locker).feeEscrow());
+            if (autoLpBps != 0) {
+                address implementation = autoLpImplementation;
+                if (implementation == address(0)) revert StrategyNotConfigured();
+                address strategy = Clones.clone(implementation);
+                HydropumpAutoLP(strategy).initialize(token, params.quoteToken, pool, locker, escrow, admin, owner());
+                routes[routeIndex++] =
+                    IHydropumpLocker.FeeRoute({routeType: AUTO_LP_ROUTE, bps: autoLpBps, strategy: strategy});
+                emit AutoLpDeployed(token, strategy, autoLpBps);
+            }
+            if (stakingRewardsBps != 0) {
+                address implementation = stakingRewardsImplementation;
+                if (implementation == address(0)) revert StrategyNotConfigured();
+                address strategy = Clones.clone(implementation);
+                HydropumpStakingRewards(strategy).initialize(
+                    token, params.quoteToken, escrow, locker, creatorRecipient, minStakeDuration
+                );
+                routes[routeIndex] = IHydropumpLocker.FeeRoute({
+                    routeType: STAKING_REWARDS_ROUTE,
+                    bps: stakingRewardsBps,
+                    strategy: strategy
+                });
+                emit StakingRewardsDeployed(token, strategy, stakingRewardsBps, minStakeDuration);
+            }
             IHydropumpLocker(locker).registerLaunchWithRoutes(
                 token, params.quoteToken, pool, msg.sender, creatorRecipient, positionIds, routes
             );
-            emit AutoLpDeployed(token, strategy, autoLpBps);
         }
 
         uint256 dust = IERC20(token).balanceOf(address(this));
@@ -457,5 +500,11 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         if (newImplementation == address(0) || newImplementation.code.length == 0) revert ZeroAddress();
         emit AutoLpImplementationUpdated(autoLpImplementation, newImplementation);
         autoLpImplementation = newImplementation;
+    }
+
+    function setStakingRewardsImplementation(address newImplementation) external onlyAdmin {
+        if (newImplementation == address(0) || newImplementation.code.length == 0) revert ZeroAddress();
+        emit StakingRewardsImplementationUpdated(stakingRewardsImplementation, newImplementation);
+        stakingRewardsImplementation = newImplementation;
     }
 }

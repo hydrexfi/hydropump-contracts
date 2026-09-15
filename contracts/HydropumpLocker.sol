@@ -13,6 +13,7 @@ import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionMana
 import {HydropumpAddresses} from "./libraries/HydropumpAddresses.sol";
 import {HydropumpFeeEscrow} from "./HydropumpFeeEscrow.sol";
 import {IAlgebraPool} from "./interfaces/IAlgebraPool.sol";
+import {HydropumpStakingRewards} from "./HydropumpStakingRewards.sol";
 
 /// @title HydropumpLocker
 /// @notice Holds every launch's positions permanently and splits their fees.
@@ -32,6 +33,7 @@ contract HydropumpLocker is
     uint256 public constant MAX_POSITIONS = 12;
     bytes32 public constant PROTOCOL_ACCOUNT = keccak256("HYDROPUMP_PROTOCOL_FEES");
     uint8 public constant AUTO_LP_ROUTE = 1;
+    uint8 public constant STAKING_REWARDS_ROUTE = 2;
 
     struct ClaimableFees {
         address launchToken;
@@ -52,6 +54,7 @@ contract HydropumpLocker is
         uint64 creatorBps;
         uint64 protocolBps;
         uint64 autoLpBps;
+        uint64 stakingRewardsBps;
     }
 
     struct Launch {
@@ -90,9 +93,11 @@ contract HydropumpLocker is
     /// @notice Lifetime fees assigned to active-band auto-LP, before compounding.
     mapping(address token => FeeTotals) public lifetimeAutoLpFees;
     mapping(address token => IHydropumpLocker.FeeRoute[] routes) internal _feeRoutes;
+    mapping(address token => address strategy) public stakingRewardsStrategy;
+    mapping(address token => FeeTotals) public lifetimeStakingRewardsFees;
 
     /// @dev Reserved so added storage does not shift the layout. Keep vars + gap == 50.
-    uint256[39] private __gap;
+    uint256[37] private __gap;
 
     event LaunchRegistered(
         address indexed token,
@@ -124,6 +129,7 @@ contract HydropumpLocker is
     event AutoLpStrategySet(address indexed token, address indexed strategy);
     event AutoLpAccrued(address indexed token, address indexed strategy, address indexed asset, uint256 amount);
     event FeeRouteRegistered(address indexed token, uint8 indexed routeType, uint64 bps, address strategy);
+    event StakingRewardsAccrued(address indexed token, address indexed strategy, address indexed asset, uint256 amount);
     event LiquidityCompounded(
         address indexed token, uint256 indexed positionId, uint256 amount0, uint256 amount1, uint128 liquidity
     );
@@ -143,7 +149,7 @@ contract HydropumpLocker is
     error InvalidPositionIndex();
     error PositionNotActive();
     error TickDeviationExceeded();
-    error InvalidAutoLpFee();
+    error InvalidFeeRouteAllocation();
     error FeeEscrowNotSet();
     error UnsupportedFeeRoute();
     error DuplicateFeeRoute();
@@ -217,6 +223,10 @@ contract HydropumpLocker is
         return keccak256(abi.encode("HYDROPUMP_AUTO_LP_FEES", token));
     }
 
+    function stakingRewardsAccount(address token) public pure returns (bytes32) {
+        return keccak256(abi.encode("HYDROPUMP_STAKING_REWARDS", token));
+    }
+
     function getFeeRoutes(address token) external view returns (IHydropumpLocker.FeeRoute[] memory) {
         return _feeRoutes[token];
     }
@@ -257,7 +267,9 @@ contract HydropumpLocker is
         address creatorRecipient,
         uint256[] calldata positionIds
     ) external {
-        _registerLaunch(token, quoteToken, pool, creator, creatorRecipient, positionIds, address(0), 0, 0, 0);
+        _registerLaunch(
+            token, quoteToken, pool, creator, creatorRecipient, positionIds, address(0), address(0), 0, 0, 0, 0
+        );
     }
 
     function registerLaunchWithRoutes(
@@ -271,19 +283,31 @@ contract HydropumpLocker is
     ) external {
         uint64 autoLpBps;
         address autoLpStrategy_;
+        uint64 stakingRewardsBps;
+        address stakingRewardsStrategy_;
         for (uint256 i = 0; i < routes.length; i++) {
             IHydropumpLocker.FeeRoute calldata route = routes[i];
-            if (route.routeType != AUTO_LP_ROUTE) revert UnsupportedFeeRoute();
-            if (autoLpStrategy_ != address(0)) revert DuplicateFeeRoute();
-            if (route.strategy == address(0) || route.bps == 0) revert InvalidAutoLpFee();
-            autoLpStrategy_ = route.strategy;
-            autoLpBps = route.bps;
+            if (route.strategy == address(0) || route.bps == 0) revert InvalidFeeRouteAllocation();
+            if (route.routeType == AUTO_LP_ROUTE) {
+                if (autoLpStrategy_ != address(0)) revert DuplicateFeeRoute();
+                autoLpStrategy_ = route.strategy;
+                autoLpBps = route.bps;
+            } else if (route.routeType == STAKING_REWARDS_ROUTE) {
+                if (stakingRewardsStrategy_ != address(0)) revert DuplicateFeeRoute();
+                stakingRewardsStrategy_ = route.strategy;
+                stakingRewardsBps = route.bps;
+            } else {
+                revert UnsupportedFeeRoute();
+            }
         }
-        if (autoLpStrategy_ == address(0)) revert InvalidAutoLpFee();
+        if (autoLpStrategy_ == address(0) && stakingRewardsStrategy_ == address(0)) {
+            revert InvalidFeeRouteAllocation();
+        }
         uint256 totalFee = uint256(creatorFee) + protocolFee;
         uint64 protocolBps = uint64((uint256(protocolFee) * 10_000) / totalFee);
         uint64 creatorBps = 10_000 - protocolBps;
-        if (autoLpBps == 0 || autoLpBps > creatorBps) revert InvalidAutoLpFee();
+        uint256 strategyBps = uint256(autoLpBps) + stakingRewardsBps;
+        if (strategyBps > creatorBps) revert InvalidFeeRouteAllocation();
         if (address(feeEscrow) == address(0)) revert FeeEscrowNotSet();
         _registerLaunch(
             token,
@@ -293,8 +317,10 @@ contract HydropumpLocker is
             creatorRecipient,
             positionIds,
             autoLpStrategy_,
+            stakingRewardsStrategy_,
             autoLpBps,
-            creatorBps - autoLpBps,
+            stakingRewardsBps,
+            uint64(uint256(creatorBps) - strategyBps),
             protocolBps
         );
         for (uint256 i = 0; i < routes.length; i++) {
@@ -310,8 +336,10 @@ contract HydropumpLocker is
         address creator,
         address creatorRecipient,
         uint256[] calldata positionIds,
-        address strategy,
+        address autoLpStrategy_,
+        address stakingRewardsStrategy_,
         uint64 autoLpBps,
+        uint64 stakingRewardsBps,
         uint64 creatorFee_,
         uint64 protocolFee_
     ) internal {
@@ -328,11 +356,20 @@ contract HydropumpLocker is
         launch.createdAt = uint64(block.timestamp);
         launch.positionIds = positionIds;
 
-        if (strategy != address(0)) {
-            autoLpStrategy[token] = strategy;
-            feeAllocation[token] =
-                FeeAllocation({creatorBps: creatorFee_, protocolBps: protocolFee_, autoLpBps: autoLpBps});
-            emit AutoLpStrategySet(token, strategy);
+        if (autoLpStrategy_ != address(0) || stakingRewardsStrategy_ != address(0)) {
+            feeAllocation[token] = FeeAllocation({
+                creatorBps: creatorFee_,
+                protocolBps: protocolFee_,
+                autoLpBps: autoLpBps,
+                stakingRewardsBps: stakingRewardsBps
+            });
+        }
+        if (autoLpStrategy_ != address(0)) {
+            autoLpStrategy[token] = autoLpStrategy_;
+            emit AutoLpStrategySet(token, autoLpStrategy_);
+        }
+        if (stakingRewardsStrategy_ != address(0)) {
+            stakingRewardsStrategy[token] = stakingRewardsStrategy_;
         }
 
         emit LaunchRegistered(token, creator, quoteToken, pool, positionIds, uint64(block.timestamp));
@@ -472,6 +509,10 @@ contract HydropumpLocker is
         if (address(feeEscrow) != address(0)) {
             feeEscrow.setRecipient(creatorAccount(token), newRecipient);
         }
+        address stakingStrategy = stakingRewardsStrategy[token];
+        if (stakingStrategy != address(0)) {
+            HydropumpStakingRewards(stakingStrategy).setNoStakerRecipient(newRecipient);
+        }
     }
 
     /// @notice Add strategy-owned assets to one of a launch's existing positions.
@@ -548,14 +589,18 @@ contract HydropumpLocker is
         uint256 creatorFee_ = creatorFee;
         uint256 protocolFee_ = protocolFee;
         uint256 autoLpAmount;
-        if (allocation.autoLpBps > 0) {
+        uint256 stakingRewardsAmount;
+        if (allocation.autoLpBps > 0 || allocation.stakingRewardsBps > 0) {
             creatorFee_ = allocation.creatorBps;
             protocolFee_ = allocation.protocolBps;
         }
-        uint256 totalFee = creatorFee_ + protocolFee_ + allocation.autoLpBps;
+        uint256 totalFee = creatorFee_ + protocolFee_ + allocation.autoLpBps + allocation.stakingRewardsBps;
         if (allocation.autoLpBps > 0) autoLpAmount = (amount * allocation.autoLpBps) / totalFee;
+        if (allocation.stakingRewardsBps > 0) {
+            stakingRewardsAmount = (amount * allocation.stakingRewardsBps) / totalFee;
+        }
         creatorAmount = (amount * creatorFee_) / totalFee;
-        protocolAmount = amount - creatorAmount - autoLpAmount;
+        protocolAmount = amount - creatorAmount - autoLpAmount - stakingRewardsAmount;
 
         if (creatorAmount > 0) {
             _credit(creatorAccount(token), _launches[token].creatorRecipient, token, asset, creatorAmount, true);
@@ -572,6 +617,14 @@ contract HydropumpLocker is
             else totals.quote += uint128(autoLpAmount);
             _credit(autoLpAccount(token), strategy, token, asset, autoLpAmount, false);
             emit AutoLpAccrued(token, strategy, asset, autoLpAmount);
+        }
+        if (stakingRewardsAmount > 0) {
+            address strategy = stakingRewardsStrategy[token];
+            FeeTotals storage totals = lifetimeStakingRewardsFees[token];
+            if (asset == token) totals.launchToken += uint128(stakingRewardsAmount);
+            else totals.quote += uint128(stakingRewardsAmount);
+            _credit(stakingRewardsAccount(token), strategy, token, asset, stakingRewardsAmount, false);
+            emit StakingRewardsAccrued(token, strategy, asset, stakingRewardsAmount);
         }
     }
 

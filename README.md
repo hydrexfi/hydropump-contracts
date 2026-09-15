@@ -15,6 +15,7 @@ creator and 25% to the protocol, which buys HYDX and bribes it into the Hydropum
 | `HydropumpLocker`     | UUPS        | Holds every launch's positions permanently, splits and pays out fees           |
 | `HydropumpFeeEscrow`  | no          | Holds credited fees and pays each fixed recipient independently                |
 | `HydropumpAutoLP`     | clones      | Compounds a launch's selected fee share into its currently active locked band  |
+| `HydropumpStakingRewards` | clones  | Distributes selected fees pro rata to stakers of the launched token            |
 | `HydropumpBuyback`    | no          | Quote → HYDX, then bribes the Hydropump gauge                                  |
 | `HydropumpGaugeToken` | no          | Placeholder ERC20 for the pair the Hydropump gauge hangs off                   |
 
@@ -80,7 +81,7 @@ share of collected LP fees in basis points, and strategy-specific configuration 
 not assigned to a route remains claimable by the creator. The Hydrex protocol share does not change.
 An empty array is equivalent to the simple `launch(params)` path.
 
-Auto-LP is the first supported route (`routeType = 1`) and currently requires empty `config`. For example,
+Auto-LP is route `1` and currently requires empty `config`. For example,
 `FeeRouteConfig({routeType: 1, bps: 1000, config: ""})` permanently redirects 10% of collected fees to
 deeper liquidity. With the default 75/25 split, a pool charging 1% then routes 0.65% of trade volume to the
 creator, 0.25% to Hydrex, and 0.10% to Auto-LP. Unknown route types, duplicate strategy types, invalid
@@ -93,6 +94,15 @@ or transfer a position. The transaction checks the active range again in the loc
 movement from the keeper's expected tick. Algebra may consume less than both available token balances;
 unused inventory stays in the strategy for the next cycle. This first version does not swap or rebalance
 that inventory. `lifetimeAutoLpFees(token)` reports how much of each asset has been assigned to this route.
+
+Staking rewards are route `2`. Its config is `abi.encode(uint64(minStakeDuration))`, allowing the launcher
+to choose anything from no lock to a longer commitment. The launcher deploys a staking group for the new
+token, and its route share of both launch-token and quote-token fees goes to that group. Stakers earn using
+per-user reward-index snapshots, so an account joining after fees were distributed cannot claim historical
+rewards. Staking more resets that account's unlock time to the configured minimum duration. Routes `1` and
+`2` can be selected together, provided their combined allocation does not exceed the creator share. If fees
+are synchronized while the group has no stakers, they go to the launch's creator recipient rather than
+becoming a backlog that the first late staker could capture.
 
 For a frontend: `claimable(token)` is a plain view returning what is credited right now for both assets, and
 `claimableMany(tokens[])` does a creator's whole portfolio in one call. `totalOwed(token)` adds fees still

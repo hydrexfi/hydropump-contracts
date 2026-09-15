@@ -319,7 +319,7 @@ contract HydropumpLockerTest is Test {
         autoIds[0] = 88;
         IHydropumpLocker.FeeRoute[] memory routes = _autoLpRoutes(stranger, 7_501);
         vm.prank(launcher);
-        vm.expectRevert(HydropumpLocker.InvalidAutoLpFee.selector);
+        vm.expectRevert(HydropumpLocker.InvalidFeeRouteAllocation.selector);
         locker.registerLaunchWithRoutes(
             address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, routes
         );
@@ -330,7 +330,7 @@ contract HydropumpLockerTest is Test {
         uint256[] memory autoIds = new uint256[](1);
         autoIds[0] = 88;
         IHydropumpLocker.FeeRoute[] memory routes = _autoLpRoutes(stranger, 1_000);
-        routes[0].routeType = 2;
+        routes[0].routeType = 3;
 
         vm.prank(launcher);
         vm.expectRevert(HydropumpLocker.UnsupportedFeeRoute.selector);
@@ -368,6 +368,31 @@ contract HydropumpLockerTest is Test {
         assertEq(locker.creatorOwed(address(second), address(second)), 6_500);
         assertEq(locker.protocolOwed(address(second)), 2_500);
         assertEq(feeEscrow.claimable(locker.autoLpAccount(address(second)), address(second)), 1_000);
+    }
+
+    function test_LaunchCanCombineAutoLpAndStakingRewardsRoutes() public {
+        MockERC20 second = new MockERC20("Routed", "ROUTE");
+        address stakingStrategy = makeAddr("stakingStrategy");
+        uint256[] memory routeIds = new uint256[](1);
+        routeIds[0] = 89;
+        IHydropumpLocker.FeeRoute[] memory routes = new IHydropumpLocker.FeeRoute[](2);
+        routes[0] = IHydropumpLocker.FeeRoute({routeType: 1, bps: 1_000, strategy: stranger});
+        routes[1] = IHydropumpLocker.FeeRoute({routeType: 2, bps: 2_000, strategy: stakingStrategy});
+
+        vm.prank(launcher);
+        locker.registerLaunchWithRoutes(
+            address(second), address(quote), address(pool), creator, creatorRecipient, routeIds, routes
+        );
+        npm.setPair(address(second), address(quote));
+        second.mint(NPM, 10_000);
+        npm.setOwed(89, 10_000, 0);
+        locker.collect(address(second), 1);
+
+        assertEq(locker.creatorOwed(address(second), address(second)), 4_500);
+        assertEq(locker.protocolOwed(address(second)), 2_500);
+        assertEq(feeEscrow.claimable(locker.autoLpAccount(address(second)), address(second)), 1_000);
+        assertEq(feeEscrow.claimable(locker.stakingRewardsAccount(address(second)), address(second)), 2_000);
+        assertEq(feeEscrow.recipient(locker.stakingRewardsAccount(address(second))), stakingStrategy);
     }
 
     function test_AutoLpRejectsAnInactivePosition() public {

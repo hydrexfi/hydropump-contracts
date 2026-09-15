@@ -10,6 +10,7 @@ import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
 import {HydropumpBuyback} from "../../contracts/HydropumpBuyback.sol";
 import {HydropumpFeeEscrow} from "../../contracts/HydropumpFeeEscrow.sol";
 import {HydropumpAutoLP} from "../../contracts/HydropumpAutoLP.sol";
+import {HydropumpStakingRewards} from "../../contracts/HydropumpStakingRewards.sol";
 import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.sol";
 
 /// @title DeployHydropump
@@ -51,6 +52,7 @@ contract DeployHydropump is Script {
         HydropumpFeeEscrow feeEscrow = new HydropumpFeeEscrow(deployer, address(locker));
         locker.setFeeEscrow(address(feeEscrow));
         HydropumpAutoLP autoLpImplementation = new HydropumpAutoLP();
+        HydropumpStakingRewards stakingRewardsImplementation = new HydropumpStakingRewards();
 
         HydropumpLauncher launcher = HydropumpLauncher(
             address(
@@ -58,7 +60,14 @@ contract DeployHydropump is Script {
                     address(new HydropumpLauncher()),
                     abi.encodeCall(
                         HydropumpLauncher.initialize,
-                        (deployer, admin, address(locker), address(autoLpImplementation), LAUNCH_FEE)
+                        (
+                            deployer,
+                            admin,
+                            address(locker),
+                            address(autoLpImplementation),
+                            address(stakingRewardsImplementation),
+                            LAUNCH_FEE
+                        )
                     )
                 )
             )
@@ -76,6 +85,7 @@ contract DeployHydropump is Script {
         console2.log("HydropumpBuyback: ", address(buyback));
         console2.log("HydropumpFeeEscrow:", address(feeEscrow));
         console2.log("AutoLP implementation:", address(autoLpImplementation));
+        console2.log("Staking rewards implementation:", address(stakingRewardsImplementation));
         console2.log("Launch fee (wei):  ", uint256(LAUNCH_FEE));
         console2.log("\nSet LAUNCHER_ADDRESS in .env, then: npm run quotes:build && npm run quotes:register:base");
         console2.log("From the Safe: accept the locker and fee escrow ownership transfers (Ownable2Step).");

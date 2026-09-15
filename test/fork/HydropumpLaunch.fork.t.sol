@@ -8,6 +8,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 
 import {HydropumpLauncher} from "../../contracts/HydropumpLauncher.sol";
 import {HydropumpAutoLP} from "../../contracts/HydropumpAutoLP.sol";
+import {HydropumpStakingRewards} from "../../contracts/HydropumpStakingRewards.sol";
 import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
 import {IAlgebraPool} from "../../contracts/interfaces/IAlgebraPool.sol";
 import {INonfungiblePositionManager} from "../../contracts/interfaces/INonfungiblePositionManager.sol";
@@ -57,7 +58,14 @@ contract HydropumpLaunchForkTest is Test {
                     address(new HydropumpLauncher()),
                     abi.encodeCall(
                         HydropumpLauncher.initialize,
-                        (owner, owner, address(locker), address(new HydropumpAutoLP()), LAUNCH_FEE)
+                        (
+                            owner,
+                            owner,
+                            address(locker),
+                            address(new HydropumpAutoLP()),
+                            address(new HydropumpStakingRewards()),
+                            LAUNCH_FEE
+                        )
                     )
                 )
             )
