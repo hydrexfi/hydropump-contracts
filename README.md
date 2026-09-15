@@ -99,10 +99,23 @@ Staking rewards are route `2`. Its config is `abi.encode(uint64(minStakeDuration
 to choose anything from no lock to a longer commitment. The launcher deploys a staking group for the new
 token, and its route share of both launch-token and quote-token fees goes to that group. Stakers earn using
 per-user reward-index snapshots, so an account joining after fees were distributed cannot claim historical
-rewards. Staking more resets that account's unlock time to the configured minimum duration. Routes `1` and
-`2` can be selected together, provided their combined allocation does not exceed the creator share. If fees
-are synchronized while the group has no stakers, they go to the launch's creator recipient rather than
-becoming a backlog that the first late staker could capture.
+rewards. Staking more resets that account's unlock time to the configured minimum duration. If fees are
+synchronized while the group has no stakers, they go to the launch's creator recipient rather than becoming
+a backlog that the first late staker could capture.
+
+veHYDX incentives are route `3` and require empty `config`. This is a creator-funded addition to the
+unchanged Hydrex protocol share: the route's launch-token and quote-token fees accrue in a separate
+per-launch escrow account whose fixed recipient is the protocol buyback address configured when the launch
+is registered. The existing buyback operator converts those assets to HYDX and bribes the Hydropump gauge.
+No additional strategy clone is needed. Routes `1`, `2`, and `3` can be combined, provided their total
+allocation does not exceed the creator share.
+
+Fee-token policy is deliberately separate from fee allocation. Algebra positions earn fees in both pool
+assets, and Hydropump currently preserves those assets: the creator, protocol, Auto-LP, staking rewards, and
+veHYDX routes are each credited both launch-token fees and quote-token fees. The locker does not silently
+swap one side. Auto-LP needs both assets, staking can distribute both, and the buyback already performs its
+own controlled conversion. A future per-route preference such as both, quote-only, or launch-token-only can
+be added at the strategy/conversion layer without coupling swaps, slippage, and MEV risk to fee accounting.
 
 For a frontend: `claimable(token)` is a plain view returning what is credited right now for both assets, and
 `claimableMany(tokens[])` does a creator's whole portfolio in one call. `totalOwed(token)` adds fees still

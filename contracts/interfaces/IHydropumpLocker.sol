@@ -30,4 +30,6 @@ interface IHydropumpLocker {
     ) external;
 
     function feeEscrow() external view returns (HydropumpFeeEscrow);
+
+    function protocolFeeRecipient() external view returns (address);
 }

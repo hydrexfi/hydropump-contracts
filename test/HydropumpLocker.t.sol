@@ -330,7 +330,7 @@ contract HydropumpLockerTest is Test {
         uint256[] memory autoIds = new uint256[](1);
         autoIds[0] = 88;
         IHydropumpLocker.FeeRoute[] memory routes = _autoLpRoutes(stranger, 1_000);
-        routes[0].routeType = 3;
+        routes[0].routeType = 4;
 
         vm.prank(launcher);
         vm.expectRevert(HydropumpLocker.UnsupportedFeeRoute.selector);
@@ -393,6 +393,50 @@ contract HydropumpLockerTest is Test {
         assertEq(feeEscrow.claimable(locker.autoLpAccount(address(second)), address(second)), 1_000);
         assertEq(feeEscrow.claimable(locker.stakingRewardsAccount(address(second)), address(second)), 2_000);
         assertEq(feeEscrow.recipient(locker.stakingRewardsAccount(address(second))), stakingStrategy);
+    }
+
+    function test_LaunchCanAllocateCreatorShareToVeHydxIncentives() public {
+        MockERC20 second = new MockERC20("Voter", "VOTE");
+        uint256[] memory routeIds = new uint256[](1);
+        routeIds[0] = 90;
+        IHydropumpLocker.FeeRoute[] memory routes = new IHydropumpLocker.FeeRoute[](1);
+        routes[0] = IHydropumpLocker.FeeRoute({routeType: 3, bps: 1_000, strategy: buyback});
+
+        vm.prank(launcher);
+        locker.registerLaunchWithRoutes(
+            address(second), address(quote), address(pool), creator, creatorRecipient, routeIds, routes
+        );
+        npm.setPair(address(second), address(quote));
+        second.mint(NPM, 10_000);
+        quote.mint(NPM, 20_000);
+        npm.setOwed(90, 10_000, 20_000);
+
+        locker.collect(address(second), 1);
+
+        assertEq(locker.creatorOwed(address(second), address(second)), 6_500);
+        assertEq(locker.creatorOwed(address(second), address(quote)), 13_000);
+        assertEq(locker.protocolOwed(address(second)), 2_500);
+        assertEq(locker.protocolOwed(address(quote)), 5_000);
+        assertEq(feeEscrow.claimable(locker.veHydxIncentivesAccount(address(second)), address(second)), 1_000);
+        assertEq(feeEscrow.claimable(locker.veHydxIncentivesAccount(address(second)), address(quote)), 2_000);
+        assertEq(feeEscrow.recipient(locker.veHydxIncentivesAccount(address(second))), buyback);
+        (uint128 lifetimeToken, uint128 lifetimeQuote) = locker.lifetimeVeHydxIncentivesFees(address(second));
+        assertEq(lifetimeToken, 1_000);
+        assertEq(lifetimeQuote, 2_000);
+    }
+
+    function test_VeHydxIncentivesRouteMustUseProtocolBuyback() public {
+        MockERC20 second = new MockERC20("Voter", "VOTE");
+        uint256[] memory routeIds = new uint256[](1);
+        routeIds[0] = 90;
+        IHydropumpLocker.FeeRoute[] memory routes = new IHydropumpLocker.FeeRoute[](1);
+        routes[0] = IHydropumpLocker.FeeRoute({routeType: 3, bps: 1_000, strategy: stranger});
+
+        vm.prank(launcher);
+        vm.expectRevert(HydropumpLocker.InvalidFeeRouteStrategy.selector);
+        locker.registerLaunchWithRoutes(
+            address(second), address(quote), address(pool), creator, creatorRecipient, routeIds, routes
+        );
     }
 
     function test_AutoLpRejectsAnInactivePosition() public {

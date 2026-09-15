@@ -283,7 +283,7 @@ contract HydropumpLauncherTest is Test {
 
     function test_FeeRoutesRejectUnsupportedTypes() public {
         HydropumpLauncher.FeeRouteConfig[] memory routes = new HydropumpLauncher.FeeRouteConfig[](1);
-        routes[0] = HydropumpLauncher.FeeRouteConfig({routeType: 3, bps: 1_000, config: ""});
+        routes[0] = HydropumpLauncher.FeeRouteConfig({routeType: 4, bps: 1_000, config: ""});
 
         vm.prank(creator);
         vm.expectRevert(HydropumpLauncher.UnsupportedFeeRoute.selector);
@@ -312,6 +312,15 @@ contract HydropumpLauncherTest is Test {
     function test_StakingRouteRequiresEncodedMinimumDuration() public {
         HydropumpLauncher.FeeRouteConfig[] memory routes = new HydropumpLauncher.FeeRouteConfig[](1);
         routes[0] = HydropumpLauncher.FeeRouteConfig({routeType: 2, bps: 500, config: ""});
+
+        vm.prank(creator);
+        vm.expectRevert(HydropumpLauncher.InvalidFeeRouteConfig.selector);
+        launcher.launch{value: LAUNCH_FEE}(_params(bytes32(0)), routes);
+    }
+
+    function test_VeHydxIncentivesRouteRejectsUnexpectedConfig() public {
+        HydropumpLauncher.FeeRouteConfig[] memory routes = new HydropumpLauncher.FeeRouteConfig[](1);
+        routes[0] = HydropumpLauncher.FeeRouteConfig({routeType: 3, bps: 500, config: hex"01"});
 
         vm.prank(creator);
         vm.expectRevert(HydropumpLauncher.InvalidFeeRouteConfig.selector);

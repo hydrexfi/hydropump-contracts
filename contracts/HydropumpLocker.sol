@@ -34,6 +34,7 @@ contract HydropumpLocker is
     bytes32 public constant PROTOCOL_ACCOUNT = keccak256("HYDROPUMP_PROTOCOL_FEES");
     uint8 public constant AUTO_LP_ROUTE = 1;
     uint8 public constant STAKING_REWARDS_ROUTE = 2;
+    uint8 public constant VEHYDX_INCENTIVES_ROUTE = 3;
 
     struct ClaimableFees {
         address launchToken;
@@ -55,6 +56,7 @@ contract HydropumpLocker is
         uint64 protocolBps;
         uint64 autoLpBps;
         uint64 stakingRewardsBps;
+        uint64 veHydxIncentivesBps;
     }
 
     struct Launch {
@@ -95,9 +97,11 @@ contract HydropumpLocker is
     mapping(address token => IHydropumpLocker.FeeRoute[] routes) internal _feeRoutes;
     mapping(address token => address strategy) public stakingRewardsStrategy;
     mapping(address token => FeeTotals) public lifetimeStakingRewardsFees;
+    mapping(address token => address strategy) public veHydxIncentivesStrategy;
+    mapping(address token => FeeTotals) public lifetimeVeHydxIncentivesFees;
 
     /// @dev Reserved so added storage does not shift the layout. Keep vars + gap == 50.
-    uint256[37] private __gap;
+    uint256[35] private __gap;
 
     event LaunchRegistered(
         address indexed token,
@@ -130,6 +134,9 @@ contract HydropumpLocker is
     event AutoLpAccrued(address indexed token, address indexed strategy, address indexed asset, uint256 amount);
     event FeeRouteRegistered(address indexed token, uint8 indexed routeType, uint64 bps, address strategy);
     event StakingRewardsAccrued(address indexed token, address indexed strategy, address indexed asset, uint256 amount);
+    event VeHydxIncentivesAccrued(
+        address indexed token, address indexed strategy, address indexed asset, uint256 amount
+    );
     event LiquidityCompounded(
         address indexed token, uint256 indexed positionId, uint256 amount0, uint256 amount1, uint128 liquidity
     );
@@ -153,6 +160,7 @@ contract HydropumpLocker is
     error FeeEscrowNotSet();
     error UnsupportedFeeRoute();
     error DuplicateFeeRoute();
+    error InvalidFeeRouteStrategy();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -227,6 +235,10 @@ contract HydropumpLocker is
         return keccak256(abi.encode("HYDROPUMP_STAKING_REWARDS", token));
     }
 
+    function veHydxIncentivesAccount(address token) public pure returns (bytes32) {
+        return keccak256(abi.encode("HYDROPUMP_VEHYDX_INCENTIVES", token));
+    }
+
     function getFeeRoutes(address token) external view returns (IHydropumpLocker.FeeRoute[] memory) {
         return _feeRoutes[token];
     }
@@ -268,7 +280,20 @@ contract HydropumpLocker is
         uint256[] calldata positionIds
     ) external {
         _registerLaunch(
-            token, quoteToken, pool, creator, creatorRecipient, positionIds, address(0), address(0), 0, 0, 0, 0
+            token,
+            quoteToken,
+            pool,
+            creator,
+            creatorRecipient,
+            positionIds,
+            address(0),
+            address(0),
+            address(0),
+            0,
+            0,
+            0,
+            0,
+            0
         );
     }
 
@@ -285,6 +310,8 @@ contract HydropumpLocker is
         address autoLpStrategy_;
         uint64 stakingRewardsBps;
         address stakingRewardsStrategy_;
+        uint64 veHydxIncentivesBps;
+        address veHydxIncentivesStrategy_;
         for (uint256 i = 0; i < routes.length; i++) {
             IHydropumpLocker.FeeRoute calldata route = routes[i];
             if (route.strategy == address(0) || route.bps == 0) revert InvalidFeeRouteAllocation();
@@ -296,17 +323,25 @@ contract HydropumpLocker is
                 if (stakingRewardsStrategy_ != address(0)) revert DuplicateFeeRoute();
                 stakingRewardsStrategy_ = route.strategy;
                 stakingRewardsBps = route.bps;
+            } else if (route.routeType == VEHYDX_INCENTIVES_ROUTE) {
+                if (veHydxIncentivesStrategy_ != address(0)) revert DuplicateFeeRoute();
+                if (route.strategy != protocolFeeRecipient) revert InvalidFeeRouteStrategy();
+                veHydxIncentivesStrategy_ = route.strategy;
+                veHydxIncentivesBps = route.bps;
             } else {
                 revert UnsupportedFeeRoute();
             }
         }
-        if (autoLpStrategy_ == address(0) && stakingRewardsStrategy_ == address(0)) {
+        if (
+            autoLpStrategy_ == address(0) && stakingRewardsStrategy_ == address(0)
+                && veHydxIncentivesStrategy_ == address(0)
+        ) {
             revert InvalidFeeRouteAllocation();
         }
         uint256 totalFee = uint256(creatorFee) + protocolFee;
         uint64 protocolBps = uint64((uint256(protocolFee) * 10_000) / totalFee);
         uint64 creatorBps = 10_000 - protocolBps;
-        uint256 strategyBps = uint256(autoLpBps) + stakingRewardsBps;
+        uint256 strategyBps = uint256(autoLpBps) + stakingRewardsBps + veHydxIncentivesBps;
         if (strategyBps > creatorBps) revert InvalidFeeRouteAllocation();
         if (address(feeEscrow) == address(0)) revert FeeEscrowNotSet();
         _registerLaunch(
@@ -318,8 +353,10 @@ contract HydropumpLocker is
             positionIds,
             autoLpStrategy_,
             stakingRewardsStrategy_,
+            veHydxIncentivesStrategy_,
             autoLpBps,
             stakingRewardsBps,
+            veHydxIncentivesBps,
             uint64(uint256(creatorBps) - strategyBps),
             protocolBps
         );
@@ -338,8 +375,10 @@ contract HydropumpLocker is
         uint256[] calldata positionIds,
         address autoLpStrategy_,
         address stakingRewardsStrategy_,
+        address veHydxIncentivesStrategy_,
         uint64 autoLpBps,
         uint64 stakingRewardsBps,
+        uint64 veHydxIncentivesBps,
         uint64 creatorFee_,
         uint64 protocolFee_
     ) internal {
@@ -356,12 +395,16 @@ contract HydropumpLocker is
         launch.createdAt = uint64(block.timestamp);
         launch.positionIds = positionIds;
 
-        if (autoLpStrategy_ != address(0) || stakingRewardsStrategy_ != address(0)) {
+        if (
+            autoLpStrategy_ != address(0) || stakingRewardsStrategy_ != address(0)
+                || veHydxIncentivesStrategy_ != address(0)
+        ) {
             feeAllocation[token] = FeeAllocation({
                 creatorBps: creatorFee_,
                 protocolBps: protocolFee_,
                 autoLpBps: autoLpBps,
-                stakingRewardsBps: stakingRewardsBps
+                stakingRewardsBps: stakingRewardsBps,
+                veHydxIncentivesBps: veHydxIncentivesBps
             });
         }
         if (autoLpStrategy_ != address(0)) {
@@ -370,6 +413,9 @@ contract HydropumpLocker is
         }
         if (stakingRewardsStrategy_ != address(0)) {
             stakingRewardsStrategy[token] = stakingRewardsStrategy_;
+        }
+        if (veHydxIncentivesStrategy_ != address(0)) {
+            veHydxIncentivesStrategy[token] = veHydxIncentivesStrategy_;
         }
 
         emit LaunchRegistered(token, creator, quoteToken, pool, positionIds, uint64(block.timestamp));
@@ -590,17 +636,22 @@ contract HydropumpLocker is
         uint256 protocolFee_ = protocolFee;
         uint256 autoLpAmount;
         uint256 stakingRewardsAmount;
-        if (allocation.autoLpBps > 0 || allocation.stakingRewardsBps > 0) {
+        uint256 veHydxIncentivesAmount;
+        if (allocation.autoLpBps > 0 || allocation.stakingRewardsBps > 0 || allocation.veHydxIncentivesBps > 0) {
             creatorFee_ = allocation.creatorBps;
             protocolFee_ = allocation.protocolBps;
         }
-        uint256 totalFee = creatorFee_ + protocolFee_ + allocation.autoLpBps + allocation.stakingRewardsBps;
+        uint256 totalFee = creatorFee_ + protocolFee_ + allocation.autoLpBps + allocation.stakingRewardsBps
+            + allocation.veHydxIncentivesBps;
         if (allocation.autoLpBps > 0) autoLpAmount = (amount * allocation.autoLpBps) / totalFee;
         if (allocation.stakingRewardsBps > 0) {
             stakingRewardsAmount = (amount * allocation.stakingRewardsBps) / totalFee;
         }
+        if (allocation.veHydxIncentivesBps > 0) {
+            veHydxIncentivesAmount = (amount * allocation.veHydxIncentivesBps) / totalFee;
+        }
         creatorAmount = (amount * creatorFee_) / totalFee;
-        protocolAmount = amount - creatorAmount - autoLpAmount - stakingRewardsAmount;
+        protocolAmount = amount - creatorAmount - autoLpAmount - stakingRewardsAmount - veHydxIncentivesAmount;
 
         if (creatorAmount > 0) {
             _credit(creatorAccount(token), _launches[token].creatorRecipient, token, asset, creatorAmount, true);
@@ -625,6 +676,14 @@ contract HydropumpLocker is
             else totals.quote += uint128(stakingRewardsAmount);
             _credit(stakingRewardsAccount(token), strategy, token, asset, stakingRewardsAmount, false);
             emit StakingRewardsAccrued(token, strategy, asset, stakingRewardsAmount);
+        }
+        if (veHydxIncentivesAmount > 0) {
+            address strategy = veHydxIncentivesStrategy[token];
+            FeeTotals storage totals = lifetimeVeHydxIncentivesFees[token];
+            if (asset == token) totals.launchToken += uint128(veHydxIncentivesAmount);
+            else totals.quote += uint128(veHydxIncentivesAmount);
+            _credit(veHydxIncentivesAccount(token), strategy, token, asset, veHydxIncentivesAmount, false);
+            emit VeHydxIncentivesAccrued(token, strategy, asset, veHydxIncentivesAmount);
         }
     }
 
