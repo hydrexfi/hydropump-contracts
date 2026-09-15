@@ -34,6 +34,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     uint8 public constant AUTO_LP_ROUTE = 1;
     uint8 public constant STAKING_REWARDS_ROUTE = 2;
     uint8 public constant VEHYDX_INCENTIVES_ROUTE = 3;
+    uint8 public constant DIRECT_RECIPIENT_ROUTE = 4;
 
     struct PendingToken {
         string name;
@@ -219,7 +220,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         payable
         returns (address token, address pool, uint256[] memory positionIds)
     {
-        return _launch(params, 0, 0, 0, 0);
+        return _launch(params, 0, 0, 0, 0, 0, address(0));
     }
 
     /// @notice Launch with one or more built-in uses of the creator-controlled fee share.
@@ -232,6 +233,8 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         uint64 stakingRewardsBps;
         uint64 veHydxIncentivesBps;
         uint64 minStakeDuration;
+        address directRecipient;
+        uint64 directRecipientBps;
         for (uint256 i = 0; i < routes.length; i++) {
             FeeRouteConfig calldata route = routes[i];
             if (route.bps == 0) revert InvalidFeeRouteConfig();
@@ -248,11 +251,25 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
                 if (veHydxIncentivesBps != 0) revert DuplicateFeeRoute();
                 if (route.config.length != 0) revert InvalidFeeRouteConfig();
                 veHydxIncentivesBps = route.bps;
+            } else if (route.routeType == DIRECT_RECIPIENT_ROUTE) {
+                if (directRecipient != address(0)) revert DuplicateFeeRoute();
+                if (route.config.length != 32) revert InvalidFeeRouteConfig();
+                directRecipient = abi.decode(route.config, (address));
+                if (directRecipient == address(0)) revert InvalidFeeRouteConfig();
+                directRecipientBps = route.bps;
             } else {
                 revert UnsupportedFeeRoute();
             }
         }
-        return _launch(params, autoLpBps, stakingRewardsBps, veHydxIncentivesBps, minStakeDuration);
+        return _launch(
+            params,
+            autoLpBps,
+            stakingRewardsBps,
+            veHydxIncentivesBps,
+            directRecipientBps,
+            minStakeDuration,
+            directRecipient
+        );
     }
 
     function _launch(
@@ -260,7 +277,9 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         uint64 autoLpBps,
         uint64 stakingRewardsBps,
         uint64 veHydxIncentivesBps,
-        uint64 minStakeDuration
+        uint64 directRecipientBps,
+        uint64 minStakeDuration,
+        address directRecipient
     ) internal returns (address token, address pool, uint256[] memory positionIds) {
         // A minimum, and any surplus is kept. No refund path means no call back into the caller here.
         if (msg.value < launchFee) revert InsufficientLaunchFee();
@@ -289,13 +308,13 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         if (params.buyAmount > 0) _buy(token, params.quoteToken, params.buyAmount);
 
         address creatorRecipient = params.creatorRecipient == address(0) ? msg.sender : params.creatorRecipient;
-        if (autoLpBps == 0 && stakingRewardsBps == 0 && veHydxIncentivesBps == 0) {
+        if (autoLpBps == 0 && stakingRewardsBps == 0 && veHydxIncentivesBps == 0 && directRecipientBps == 0) {
             IHydropumpLocker(locker).registerLaunch(
                 token, params.quoteToken, pool, msg.sender, creatorRecipient, positionIds
             );
         } else {
-            uint256 routeCount =
-                (autoLpBps == 0 ? 0 : 1) + (stakingRewardsBps == 0 ? 0 : 1) + (veHydxIncentivesBps == 0 ? 0 : 1);
+            uint256 routeCount = (autoLpBps == 0 ? 0 : 1) + (stakingRewardsBps == 0 ? 0 : 1)
+                + (veHydxIncentivesBps == 0 ? 0 : 1) + (directRecipientBps == 0 ? 0 : 1);
             IHydropumpLocker.FeeRoute[] memory routes = new IHydropumpLocker.FeeRoute[](routeCount);
             uint256 routeIndex;
             address escrow = address(IHydropumpLocker(locker).feeEscrow());
@@ -327,6 +346,13 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
                     routeType: VEHYDX_INCENTIVES_ROUTE,
                     bps: veHydxIncentivesBps,
                     strategy: IHydropumpLocker(locker).protocolFeeRecipient()
+                });
+            }
+            if (directRecipientBps != 0) {
+                routes[routeIndex++] = IHydropumpLocker.FeeRoute({
+                    routeType: DIRECT_RECIPIENT_ROUTE,
+                    bps: directRecipientBps,
+                    strategy: directRecipient
                 });
             }
             IHydropumpLocker(locker).registerLaunchWithRoutes(

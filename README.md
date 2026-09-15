@@ -110,6 +110,14 @@ is registered. The existing buyback operator converts those assets to HYDX and b
 No additional strategy clone is needed. Routes `1`, `2`, and `3` can be combined, provided their total
 allocation does not exceed the creator share.
 
+Direct recipient is route `4`. Its config is `abi.encode(recipient)`, where `recipient` must be nonzero.
+It redirects the selected part of the creator share to that fixed address without deploying a strategy
+contract. Both launch-token and quote-token fees accrue in a per-launch escrow account, and anyone may
+trigger a claim, but the escrow always pays the address selected at launch. For example,
+`FeeRouteConfig({routeType: 4, bps: 500, config: abi.encode(recipient)})` assigns 5% of collected LP fees to
+that recipient. One direct recipient may be configured per launch, and its allocation can be combined with
+routes `1`, `2`, and `3` within the creator-share limit.
+
 Fee-token policy is deliberately separate from fee allocation. Algebra positions earn fees in both pool
 assets, and Hydropump currently preserves those assets: the creator, protocol, Auto-LP, staking rewards, and
 veHYDX routes are each credited both launch-token fees and quote-token fees. The locker does not silently

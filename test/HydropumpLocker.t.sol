@@ -330,7 +330,7 @@ contract HydropumpLockerTest is Test {
         uint256[] memory autoIds = new uint256[](1);
         autoIds[0] = 88;
         IHydropumpLocker.FeeRoute[] memory routes = _autoLpRoutes(stranger, 1_000);
-        routes[0].routeType = 4;
+        routes[0].routeType = 5;
 
         vm.prank(launcher);
         vm.expectRevert(HydropumpLocker.UnsupportedFeeRoute.selector);
@@ -437,6 +437,37 @@ contract HydropumpLockerTest is Test {
         locker.registerLaunchWithRoutes(
             address(second), address(quote), address(pool), creator, creatorRecipient, routeIds, routes
         );
+    }
+
+    function test_LaunchCanAllocateCreatorShareToAnyDirectRecipient() public {
+        MockERC20 second = new MockERC20("Direct", "DIRECT");
+        address recipient = makeAddr("directRecipient");
+        uint256[] memory routeIds = new uint256[](1);
+        routeIds[0] = 91;
+        IHydropumpLocker.FeeRoute[] memory routes = new IHydropumpLocker.FeeRoute[](1);
+        routes[0] = IHydropumpLocker.FeeRoute({routeType: 4, bps: 1_000, strategy: recipient});
+
+        vm.prank(launcher);
+        locker.registerLaunchWithRoutes(
+            address(second), address(quote), address(pool), creator, creatorRecipient, routeIds, routes
+        );
+        npm.setPair(address(second), address(quote));
+        second.mint(NPM, 10_000);
+        quote.mint(NPM, 20_000);
+        npm.setOwed(91, 10_000, 20_000);
+
+        locker.collect(address(second), 1);
+
+        assertEq(locker.creatorOwed(address(second), address(second)), 6_500);
+        assertEq(locker.creatorOwed(address(second), address(quote)), 13_000);
+        assertEq(locker.protocolOwed(address(second)), 2_500);
+        assertEq(locker.protocolOwed(address(quote)), 5_000);
+        assertEq(feeEscrow.claimable(locker.directRecipientAccount(address(second)), address(second)), 1_000);
+        assertEq(feeEscrow.claimable(locker.directRecipientAccount(address(second)), address(quote)), 2_000);
+        assertEq(feeEscrow.recipient(locker.directRecipientAccount(address(second))), recipient);
+        (uint128 lifetimeToken, uint128 lifetimeQuote) = locker.lifetimeDirectRecipientFees(address(second));
+        assertEq(lifetimeToken, 1_000);
+        assertEq(lifetimeQuote, 2_000);
     }
 
     function test_AutoLpRejectsAnInactivePosition() public {
