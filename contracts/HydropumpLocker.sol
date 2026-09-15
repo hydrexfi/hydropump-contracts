@@ -12,10 +12,17 @@ import {IHydropumpLocker} from "./interfaces/IHydropumpLocker.sol";
 import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionManager.sol";
 import {HydropumpAddresses} from "./libraries/HydropumpAddresses.sol";
 import {HydropumpFeeEscrow} from "./HydropumpFeeEscrow.sol";
+import {IAlgebraPool} from "./interfaces/IAlgebraPool.sol";
 
 /// @title HydropumpLocker
 /// @notice Holds every launch's positions permanently and splits their fees.
-contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable, IERC721Receiver, IHydropumpLocker {
+contract HydropumpLocker is
+    Initializable,
+    Ownable2StepUpgradeable,
+    UUPSUpgradeable,
+    IERC721Receiver,
+    IHydropumpLocker
+{
     using SafeERC20 for IERC20;
 
     INonfungiblePositionManager public constant nonfungiblePositionManager =
@@ -38,6 +45,12 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     struct FeeTotals {
         uint128 launchToken;
         uint128 quote;
+    }
+
+    struct FeeAllocation {
+        uint64 creatorBps;
+        uint64 protocolBps;
+        uint64 autoLpBps;
     }
 
     struct Launch {
@@ -70,8 +83,14 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     /// @notice External custody and accounting for fees collected after it is configured.
     HydropumpFeeEscrow public feeEscrow;
 
+    /// @notice Per-launch strategy allowed only to add liquidity to an existing active position.
+    mapping(address token => address strategy) public autoLpStrategy;
+    mapping(address token => FeeAllocation allocation) public feeAllocation;
+    /// @notice Lifetime fees assigned to active-band auto-LP, before compounding.
+    mapping(address token => FeeTotals) public lifetimeAutoLpFees;
+
     /// @dev Reserved so added storage does not shift the layout. Keep vars + gap == 50.
-    uint256[43] private __gap;
+    uint256[40] private __gap;
 
     event LaunchRegistered(
         address indexed token,
@@ -100,6 +119,11 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     event LauncherUpdated(address indexed previousLauncher, address indexed newLauncher);
     event ProtocolFeeRecipientUpdated(address indexed previousRecipient, address indexed newRecipient);
     event FeeEscrowSet(address indexed feeEscrow);
+    event AutoLpStrategySet(address indexed token, address indexed strategy);
+    event AutoLpAccrued(address indexed token, address indexed strategy, address indexed asset, uint256 amount);
+    event LiquidityCompounded(
+        address indexed token, uint256 indexed positionId, uint256 amount0, uint256 amount1, uint128 liquidity
+    );
 
     error NotLauncher();
     error NotNFTPositionManager();
@@ -111,6 +135,13 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     error InvalidPositionCount();
     error InvalidFeeSplit();
     error FeeEscrowAlreadySet();
+    error NotAutoLpStrategy();
+    error AutoLpStrategyAlreadySet();
+    error InvalidPositionIndex();
+    error PositionNotActive();
+    error TickDeviationExceeded();
+    error InvalidAutoLpFee();
+    error FeeEscrowNotSet();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -177,6 +208,10 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         return keccak256(abi.encode("HYDROPUMP_CREATOR_FEES", token));
     }
 
+    function autoLpAccount(address token) public pure returns (bytes32) {
+        return keccak256(abi.encode("HYDROPUMP_AUTO_LP_FEES", token));
+    }
+
     /// @notice Creator balance across legacy locker storage and the external fee escrow.
     function creatorOwed(address token, address asset) public view returns (uint256 amount) {
         amount = _legacyCreatorOwed[token][asset];
@@ -213,6 +248,51 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         address creatorRecipient,
         uint256[] calldata positionIds
     ) external {
+        _registerLaunch(token, quoteToken, pool, creator, creatorRecipient, positionIds, address(0), 0, 0, 0);
+    }
+
+    function registerLaunchWithAutoLp(
+        address token,
+        address quoteToken,
+        address pool,
+        address creator,
+        address creatorRecipient,
+        uint256[] calldata positionIds,
+        address strategy,
+        uint64 autoLpBps
+    ) external {
+        if (strategy == address(0)) revert ZeroAddress();
+        uint256 totalFee = uint256(creatorFee) + protocolFee;
+        uint64 protocolBps = uint64((uint256(protocolFee) * 10_000) / totalFee);
+        uint64 creatorBps = 10_000 - protocolBps;
+        if (autoLpBps == 0 || autoLpBps > creatorBps) revert InvalidAutoLpFee();
+        if (address(feeEscrow) == address(0)) revert FeeEscrowNotSet();
+        _registerLaunch(
+            token,
+            quoteToken,
+            pool,
+            creator,
+            creatorRecipient,
+            positionIds,
+            strategy,
+            autoLpBps,
+            creatorBps - autoLpBps,
+            protocolBps
+        );
+    }
+
+    function _registerLaunch(
+        address token,
+        address quoteToken,
+        address pool,
+        address creator,
+        address creatorRecipient,
+        uint256[] calldata positionIds,
+        address strategy,
+        uint64 autoLpBps,
+        uint64 creatorFee_,
+        uint64 protocolFee_
+    ) internal {
         if (msg.sender != launcher) revert NotLauncher();
         if (_launches[token].pool != address(0)) revert AlreadyRegistered();
         if (creatorRecipient == address(0)) revert ZeroAddress();
@@ -225,6 +305,13 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         launch.creatorRecipient = creatorRecipient;
         launch.createdAt = uint64(block.timestamp);
         launch.positionIds = positionIds;
+
+        if (strategy != address(0)) {
+            autoLpStrategy[token] = strategy;
+            feeAllocation[token] =
+                FeeAllocation({creatorBps: creatorFee_, protocolBps: protocolFee_, autoLpBps: autoLpBps});
+            emit AutoLpStrategySet(token, strategy);
+        }
 
         emit LaunchRegistered(token, creator, quoteToken, pool, positionIds, uint64(block.timestamp));
     }
@@ -365,6 +452,61 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         }
     }
 
+    /// @notice Add strategy-owned assets to one of a launch's existing positions.
+    /// @dev The current tick must be both close to the keeper's expected tick and inside the selected range.
+    ///      Any desired assets that the position manager does not consume are returned to the strategy.
+    function compound(
+        address token,
+        uint256 positionIndex,
+        uint256 amount0Desired,
+        uint256 amount1Desired,
+        uint256 amount0Min,
+        uint256 amount1Min,
+        int24 expectedTick,
+        uint24 maxTickDeviation
+    ) external returns (uint128 liquidity, uint256 amount0, uint256 amount1) {
+        if (msg.sender != autoLpStrategy[token]) revert NotAutoLpStrategy();
+
+        Launch storage launch = _launches[token];
+        if (positionIndex >= launch.positionIds.length) revert InvalidPositionIndex();
+
+        (, int24 currentTick,,,,) = IAlgebraPool(launch.pool).globalState();
+        int256 deviation = int256(currentTick) - int256(expectedTick);
+        if (deviation < 0) deviation = -deviation;
+        if (uint256(deviation) > maxTickDeviation) revert TickDeviationExceeded();
+
+        uint256 positionId = launch.positionIds[positionIndex];
+        (,,,,, int24 tickLower, int24 tickUpper,,,,,) = nonfungiblePositionManager.positions(positionId);
+        if (currentTick < tickLower || currentTick >= tickUpper) revert PositionNotActive();
+
+        if (amount0Desired > 0) IERC20(token).safeTransferFrom(msg.sender, address(this), amount0Desired);
+        if (amount1Desired > 0) {
+            IERC20(launch.quoteToken).safeTransferFrom(msg.sender, address(this), amount1Desired);
+        }
+
+        IERC20(token).forceApprove(address(nonfungiblePositionManager), amount0Desired);
+        IERC20(launch.quoteToken).forceApprove(address(nonfungiblePositionManager), amount1Desired);
+        (liquidity, amount0, amount1) = nonfungiblePositionManager.increaseLiquidity(
+            INonfungiblePositionManager.IncreaseLiquidityParams({
+                tokenId: positionId,
+                amount0Desired: amount0Desired,
+                amount1Desired: amount1Desired,
+                amount0Min: amount0Min,
+                amount1Min: amount1Min,
+                deadline: block.timestamp
+            })
+        );
+        IERC20(token).forceApprove(address(nonfungiblePositionManager), 0);
+        IERC20(launch.quoteToken).forceApprove(address(nonfungiblePositionManager), 0);
+
+        if (amount0Desired > amount0) IERC20(token).safeTransfer(msg.sender, amount0Desired - amount0);
+        if (amount1Desired > amount1) {
+            IERC20(launch.quoteToken).safeTransfer(msg.sender, amount1Desired - amount1);
+        }
+
+        emit LiquidityCompounded(token, positionId, amount0, amount1, liquidity);
+    }
+
     function onERC721Received(address, address, uint256, bytes calldata) external view override returns (bytes4) {
         if (msg.sender != address(nonfungiblePositionManager)) revert NotNFTPositionManager();
         return this.onERC721Received.selector;
@@ -380,8 +522,18 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     {
         if (amount == 0) return (0, 0);
 
-        creatorAmount = (amount * creatorFee) / (uint256(creatorFee) + protocolFee);
-        protocolAmount = amount - creatorAmount;
+        FeeAllocation memory allocation = feeAllocation[token];
+        uint256 creatorFee_ = creatorFee;
+        uint256 protocolFee_ = protocolFee;
+        uint256 autoLpAmount;
+        if (allocation.autoLpBps > 0) {
+            creatorFee_ = allocation.creatorBps;
+            protocolFee_ = allocation.protocolBps;
+        }
+        uint256 totalFee = creatorFee_ + protocolFee_ + allocation.autoLpBps;
+        if (allocation.autoLpBps > 0) autoLpAmount = (amount * allocation.autoLpBps) / totalFee;
+        creatorAmount = (amount * creatorFee_) / totalFee;
+        protocolAmount = amount - creatorAmount - autoLpAmount;
 
         if (creatorAmount > 0) {
             _credit(creatorAccount(token), _launches[token].creatorRecipient, token, asset, creatorAmount, true);
@@ -390,6 +542,14 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         if (protocolAmount > 0) {
             _credit(PROTOCOL_ACCOUNT, protocolFeeRecipient, token, asset, protocolAmount, false);
             emit ProtocolAccrued(asset, protocolAmount);
+        }
+        if (autoLpAmount > 0) {
+            address strategy = autoLpStrategy[token];
+            FeeTotals storage totals = lifetimeAutoLpFees[token];
+            if (asset == token) totals.launchToken += uint128(autoLpAmount);
+            else totals.quote += uint128(autoLpAmount);
+            _credit(autoLpAccount(token), strategy, token, asset, autoLpAmount, false);
+            emit AutoLpAccrued(token, strategy, asset, autoLpAmount);
         }
     }
 
@@ -459,5 +619,14 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         feeEscrow = HydropumpFeeEscrow(newFeeEscrow);
         feeEscrow.setRecipient(PROTOCOL_ACCOUNT, protocolFeeRecipient);
         emit FeeEscrowSet(newFeeEscrow);
+    }
+
+    /// @notice Bind a launch to its auto-LP strategy once. The allocation layer will deploy and set this atomically.
+    function setAutoLpStrategy(address token, address strategy) external onlyOwner {
+        if (_launches[token].pool == address(0)) revert UnknownLaunch();
+        if (strategy == address(0)) revert ZeroAddress();
+        if (autoLpStrategy[token] != address(0)) revert AutoLpStrategyAlreadySet();
+        autoLpStrategy[token] = strategy;
+        emit AutoLpStrategySet(token, strategy);
     }
 }

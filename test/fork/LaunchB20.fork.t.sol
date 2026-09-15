@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {HydropumpLauncher} from "../../contracts/HydropumpLauncher.sol";
+import {HydropumpAutoLP} from "../../contracts/HydropumpAutoLP.sol";
 import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
 import {IAlgebraPool} from "../../contracts/interfaces/IAlgebraPool.sol";
 import {ISwapRouter} from "../../contracts/interfaces/ISwapRouter.sol";
@@ -63,7 +64,10 @@ contract LaunchB20ForkTest is Test {
             address(
                 new ERC1967Proxy(
                     address(new HydropumpLauncher()),
-                    abi.encodeCall(HydropumpLauncher.initialize, (owner, owner, address(locker), LAUNCH_FEE))
+                    abi.encodeCall(
+                        HydropumpLauncher.initialize,
+                        (owner, owner, address(locker), address(new HydropumpAutoLP()), LAUNCH_FEE)
+                    )
                 )
             )
         );

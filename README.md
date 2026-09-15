@@ -14,6 +14,7 @@ creator and 25% to the protocol, which buys HYDX and bribes it into the Hydropum
 | `HydropumpToken`      | no          | Plain immutable ERC20 — burnable, permit, no owner, no mint path, not a proxy  |
 | `HydropumpLocker`     | UUPS        | Holds every launch's positions permanently, splits and pays out fees           |
 | `HydropumpFeeEscrow`  | no          | Holds credited fees and pays each fixed recipient independently                |
+| `HydropumpAutoLP`     | clones      | Compounds a launch's selected fee share into its currently active locked band  |
 | `HydropumpBuyback`    | no          | Quote → HYDX, then bribes the Hydropump gauge                                  |
 | `HydropumpGaugeToken` | no          | Placeholder ERC20 for the pair the Hydropump gauge hangs off                   |
 
@@ -72,6 +73,20 @@ revert.
 The split is stored, not hardcoded — `setFeeSplit` takes the two shares and only their ratio matters, so
 7500/2500 and 75/25 are the same thing. Changes apply to fees collected from then on; balances already
 credited are untouched.
+
+A creator can instead call `launchWithAutoLp(params, autoLpBps)` to permanently redirect part of the
+creator share to deeper liquidity. `autoLpBps` is an absolute share of collected LP fees, expressed out of
+10,000, and cannot exceed the creator's share. The Hydrex protocol share does not change. For example, with
+the default 75/25 split and `autoLpBps = 1000`, a pool charging 1% routes 0.65% of trade volume to the
+creator, 0.25% to Hydrex, and 0.10% to Auto-LP.
+
+Each opted-in launch receives its own minimal `HydropumpAutoLP` clone. Its escrow allocation is tracked by
+token, and the operator compounds it into the one existing locked position whose tick range contains the
+pool's current tick. It does not divide funds evenly among all five positions and cannot create, withdraw,
+or transfer a position. The transaction checks the active range again in the locker and rejects excessive
+movement from the keeper's expected tick. Algebra may consume less than both available token balances;
+unused inventory stays in the strategy for the next cycle. This first version does not swap or rebalance
+that inventory. `lifetimeAutoLpFees(token)` reports how much of each asset has been assigned to this route.
 
 For a frontend: `claimable(token)` is a plain view returning what is credited right now for both assets, and
 `claimableMany(tokens[])` does a creator's whole portfolio in one call. `totalOwed(token)` adds fees still

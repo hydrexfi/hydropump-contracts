@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {HydropumpLauncher} from "../../contracts/HydropumpLauncher.sol";
+import {HydropumpAutoLP} from "../../contracts/HydropumpAutoLP.sol";
 import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
 import {IAlgebraPool} from "../../contracts/interfaces/IAlgebraPool.sol";
 import {INonfungiblePositionManager} from "../../contracts/interfaces/INonfungiblePositionManager.sol";
@@ -54,7 +55,10 @@ contract HydropumpLaunchForkTest is Test {
             address(
                 new ERC1967Proxy(
                     address(new HydropumpLauncher()),
-                    abi.encodeCall(HydropumpLauncher.initialize, (owner, owner, address(locker), LAUNCH_FEE))
+                    abi.encodeCall(
+                        HydropumpLauncher.initialize,
+                        (owner, owner, address(locker), address(new HydropumpAutoLP()), LAUNCH_FEE)
+                    )
                 )
             )
         );
@@ -238,7 +242,12 @@ contract HydropumpLaunchForkTest is Test {
         vm.prank(creator);
         launcher.launch{value: LAUNCH_FEE + surplus}(
             HydropumpLauncher.LaunchParams({
-                name: "Beta", symbol: "BETA", quoteToken: WETH, userSalt: salt2, creatorRecipient: creator, buyAmount: 0
+                name: "Beta",
+                symbol: "BETA",
+                quoteToken: WETH,
+                userSalt: salt2,
+                creatorRecipient: creator,
+                buyAmount: 0
             })
         );
         assertEq(address(launcher).balance, LAUNCH_FEE * 2 + surplus, "surplus is kept");

@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {HydropumpLauncher} from "../contracts/HydropumpLauncher.sol";
+import {HydropumpAutoLP} from "../contracts/HydropumpAutoLP.sol";
 import {HydropumpAddresses} from "../contracts/libraries/HydropumpAddresses.sol";
 
 contract HydropumpLauncherTest is Test {
@@ -26,7 +27,9 @@ contract HydropumpLauncherTest is Test {
             address(
                 new ERC1967Proxy(
                     address(new HydropumpLauncher()),
-                    abi.encodeCall(HydropumpLauncher.initialize, (owner, admin, locker, LAUNCH_FEE))
+                    abi.encodeCall(
+                        HydropumpLauncher.initialize, (owner, admin, locker, address(new HydropumpAutoLP()), LAUNCH_FEE)
+                    )
                 )
             )
         );
@@ -263,13 +266,19 @@ contract HydropumpLauncherTest is Test {
 
     function test_ImplementationCannotBeInitialized() public {
         HydropumpLauncher impl = new HydropumpLauncher();
+        HydropumpAutoLP autoLp = new HydropumpAutoLP();
         vm.expectRevert();
-        impl.initialize(owner, admin, locker, LAUNCH_FEE);
+        impl.initialize(owner, admin, locker, address(autoLp), LAUNCH_FEE);
     }
 
     function _params(bytes32 salt) internal view returns (HydropumpLauncher.LaunchParams memory) {
         return HydropumpLauncher.LaunchParams({
-            name: "Alpha", symbol: "ALPHA", quoteToken: WETH, userSalt: salt, creatorRecipient: creator, buyAmount: 0
+            name: "Alpha",
+            symbol: "ALPHA",
+            quoteToken: WETH,
+            userSalt: salt,
+            creatorRecipient: creator,
+            buyAmount: 0
         });
     }
 

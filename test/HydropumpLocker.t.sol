@@ -9,6 +9,7 @@ import {HydropumpFeeEscrow} from "../contracts/HydropumpFeeEscrow.sol";
 import {HydropumpAddresses} from "../contracts/libraries/HydropumpAddresses.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockPositionManager} from "./mocks/MockPositionManager.sol";
+import {MockAlgebraPool} from "./mocks/MockAlgebraPool.sol";
 import {INonfungiblePositionManager} from "../contracts/interfaces/INonfungiblePositionManager.sol";
 
 contract HydropumpLockerTest is Test {
@@ -17,6 +18,7 @@ contract HydropumpLockerTest is Test {
     HydropumpLocker internal locker;
     HydropumpFeeEscrow internal feeEscrow;
     MockPositionManager internal npm;
+    MockAlgebraPool internal pool;
     MockERC20 internal launchToken;
     MockERC20 internal quote;
 
@@ -37,6 +39,7 @@ contract HydropumpLockerTest is Test {
 
         vm.etch(NPM, address(new MockPositionManager()).code);
         npm = MockPositionManager(NPM);
+        pool = new MockAlgebraPool();
 
         launchToken = new MockERC20("Alpha", "ALPHA");
         quote = new MockERC20("Wrapped Ether", "WETH");
@@ -56,7 +59,7 @@ contract HydropumpLockerTest is Test {
         locker.setFeeEscrow(address(feeEscrow));
 
         vm.prank(launcher);
-        locker.registerLaunch(address(launchToken), address(quote), makeAddr("pool"), creator, creatorRecipient, ids);
+        locker.registerLaunch(address(launchToken), address(quote), address(pool), creator, creatorRecipient, ids);
     }
 
     function _fund(uint256 positionId, uint256 amount0, uint256 amount1) internal {
@@ -225,9 +228,7 @@ contract HydropumpLockerTest is Test {
             address(
                 new ERC1967Proxy(
                     address(new HydropumpLocker()),
-                    abi.encodeCall(
-                        HydropumpLocker.initialize, (owner, launcher, buyback, uint64(7_500), uint64(2_500))
-                    )
+                    abi.encodeCall(HydropumpLocker.initialize, (owner, launcher, buyback, uint64(7_500), uint64(2_500)))
                 )
             )
         );
@@ -258,6 +259,120 @@ contract HydropumpLockerTest is Test {
         assertEq(quote.balanceOf(creatorRecipient), 6_000);
         assertEq(launchToken.balanceOf(buyback), 2_500);
         assertEq(quote.balanceOf(buyback), 2_000);
+    }
+
+    function test_ApprovedAutoLpStrategyCompoundsOnlyTheActivePosition() public {
+        pool.setTick(150);
+        npm.setPosition(1, 100, 200);
+
+        vm.prank(owner);
+        locker.setAutoLpStrategy(address(launchToken), stranger);
+
+        launchToken.mint(stranger, 1_000);
+        quote.mint(stranger, 500);
+        vm.startPrank(stranger);
+        launchToken.approve(address(locker), 1_000);
+        quote.approve(address(locker), 500);
+
+        locker.compound(address(launchToken), 0, 1_000, 500, 700, 350, 150, 5);
+        vm.stopPrank();
+
+        assertEq(npm.increased0(1), 800);
+        assertEq(npm.increased1(1), 400);
+        assertEq(launchToken.balanceOf(stranger), 200, "unused token0 returned to strategy");
+        assertEq(quote.balanceOf(stranger), 100, "unused token1 returned to strategy");
+    }
+
+    function test_LaunchCanAllocatePartOfCreatorShareToAutoLp() public {
+        MockERC20 second = new MockERC20("Auto", "AUTO");
+        uint256[] memory autoIds = new uint256[](1);
+        autoIds[0] = 88;
+        vm.prank(launcher);
+        locker.registerLaunchWithAutoLp(
+            address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, stranger, 1_000
+        );
+        npm.setPair(address(second), address(quote));
+        second.mint(NPM, 10_000);
+        npm.setOwed(88, 10_000, 0);
+
+        locker.collect(address(second), 1);
+
+        assertEq(locker.creatorOwed(address(second), address(second)), 6_500);
+        assertEq(locker.protocolOwed(address(second)), 2_500);
+        assertEq(feeEscrow.claimable(locker.autoLpAccount(address(second)), address(second)), 1_000);
+        assertEq(feeEscrow.recipient(locker.autoLpAccount(address(second))), stranger);
+        (uint128 lifetimeToken, uint128 lifetimeQuote) = locker.lifetimeAutoLpFees(address(second));
+        assertEq(lifetimeToken, 1_000);
+        assertEq(lifetimeQuote, 0);
+    }
+
+    function test_AutoLpCannotExceedCreatorAllocation() public {
+        MockERC20 second = new MockERC20("Auto", "AUTO");
+        uint256[] memory autoIds = new uint256[](1);
+        autoIds[0] = 88;
+        vm.prank(launcher);
+        vm.expectRevert(HydropumpLocker.InvalidAutoLpFee.selector);
+        locker.registerLaunchWithAutoLp(
+            address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, stranger, 7_501
+        );
+    }
+
+    function test_AutoLpAllocationSnapshotsProtocolShareAtLaunch() public {
+        MockERC20 second = new MockERC20("Auto", "AUTO");
+        uint256[] memory autoIds = new uint256[](1);
+        autoIds[0] = 88;
+        vm.prank(launcher);
+        locker.registerLaunchWithAutoLp(
+            address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, stranger, 1_000
+        );
+
+        vm.prank(owner);
+        locker.setFeeSplit(5_000, 5_000);
+        npm.setPair(address(second), address(quote));
+        second.mint(NPM, 10_000);
+        npm.setOwed(88, 10_000, 0);
+        locker.collect(address(second), 1);
+
+        assertEq(locker.creatorOwed(address(second), address(second)), 6_500);
+        assertEq(locker.protocolOwed(address(second)), 2_500);
+        assertEq(feeEscrow.claimable(locker.autoLpAccount(address(second)), address(second)), 1_000);
+    }
+
+    function test_AutoLpRejectsAnInactivePosition() public {
+        pool.setTick(250);
+        npm.setPosition(1, 100, 200);
+        vm.prank(owner);
+        locker.setAutoLpStrategy(address(launchToken), stranger);
+
+        vm.prank(stranger);
+        vm.expectRevert(HydropumpLocker.PositionNotActive.selector);
+        locker.compound(address(launchToken), 0, 0, 0, 0, 0, 250, 5);
+    }
+
+    function test_AutoLpRejectsUnapprovedCallerAndUnregisteredPosition() public {
+        pool.setTick(150);
+        npm.setPosition(1, 100, 200);
+
+        vm.prank(stranger);
+        vm.expectRevert(HydropumpLocker.NotAutoLpStrategy.selector);
+        locker.compound(address(launchToken), 0, 0, 0, 0, 0, 150, 5);
+
+        vm.prank(owner);
+        locker.setAutoLpStrategy(address(launchToken), stranger);
+        vm.prank(stranger);
+        vm.expectRevert(HydropumpLocker.InvalidPositionIndex.selector);
+        locker.compound(address(launchToken), 5, 0, 0, 0, 0, 150, 5);
+    }
+
+    function test_AutoLpChecksExpectedTick() public {
+        pool.setTick(150);
+        npm.setPosition(1, 100, 200);
+        vm.prank(owner);
+        locker.setAutoLpStrategy(address(launchToken), stranger);
+
+        vm.prank(stranger);
+        vm.expectRevert(HydropumpLocker.TickDeviationExceeded.selector);
+        locker.compound(address(launchToken), 0, 0, 0, 0, 0, 100, 5);
     }
 
     function test_CollectOnlyTouchesMaskedPositions() public {
