@@ -8,6 +8,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {HydropumpLauncher} from "../../contracts/HydropumpLauncher.sol";
 import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
 import {HydropumpBuyback} from "../../contracts/HydropumpBuyback.sol";
+import {HydropumpFeeEscrow} from "../../contracts/HydropumpFeeEscrow.sol";
 import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.sol";
 
 /// @title DeployHydropump
@@ -46,6 +47,9 @@ contract DeployHydropump is Script {
             )
         );
 
+        HydropumpFeeEscrow feeEscrow = new HydropumpFeeEscrow(deployer, address(locker));
+        locker.setFeeEscrow(address(feeEscrow));
+
         HydropumpLauncher launcher = HydropumpLauncher(
             address(
                 new ERC1967Proxy(
@@ -57,6 +61,7 @@ contract DeployHydropump is Script {
 
         locker.setLauncher(address(launcher));
         locker.transferOwnership(admin);
+        feeEscrow.transferOwnership(admin);
 
         vm.stopBroadcast();
 
@@ -64,8 +69,9 @@ contract DeployHydropump is Script {
         console2.log("HydropumpLauncher:", address(launcher));
         console2.log("HydropumpLocker:  ", address(locker));
         console2.log("HydropumpBuyback: ", address(buyback));
+        console2.log("HydropumpFeeEscrow:", address(feeEscrow));
         console2.log("Launch fee (wei):  ", uint256(LAUNCH_FEE));
         console2.log("\nSet LAUNCHER_ADDRESS in .env, then: npm run quotes:build && npm run quotes:register:base");
-        console2.log("From the Safe: accept the locker ownership transfer (Ownable2Step).");
+        console2.log("From the Safe: accept the locker and fee escrow ownership transfers (Ownable2Step).");
     }
 }

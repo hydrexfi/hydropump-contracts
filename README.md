@@ -13,6 +13,7 @@ creator and 25% to the protocol, which buys HYDX and bribes it into the Hydropum
 | `HydropumpLauncher`   | UUPS        | Deploys the token, creates the pool, mints the bands, hands them to the locker |
 | `HydropumpToken`      | no          | Plain immutable ERC20 — burnable, permit, no owner, no mint path, not a proxy  |
 | `HydropumpLocker`     | UUPS        | Holds every launch's positions permanently, splits and pays out fees           |
+| `HydropumpFeeEscrow`  | no          | Holds credited fees and pays each fixed recipient independently                |
 | `HydropumpBuyback`    | no          | Quote → HYDX, then bribes the Hydropump gauge                                  |
 | `HydropumpGaugeToken` | no          | Placeholder ERC20 for the pair the Hydropump gauge hangs off                   |
 
@@ -54,15 +55,15 @@ Where a swap fee goes, in order:
 1. Algebra skims `communityFee / 1000` of it into the pool's community vault, before the positions see
    anything. Read it per pool from `globalState()`; launch pools inherit the factory's default at creation.
 2. What is left accrues to the locked positions, uncollected, until someone calls `collect`.
-3. `collect(token, positionMask)` pulls it into the locker and credits both shares — the creator's to
-   `creatorOwed[token][asset]`, the protocol's to `protocolOwed[asset]`. It transfers nothing out. Bit `i`
+3. `collect(token, positionMask)` pulls it into the locker, splits it, and credits both shares in the fee
+   escrow — the creator's per launch, the protocol's pooled by asset. It pays no final recipient. Bit `i`
    of the mask selects band `i`; `fullMask(token)` is all of them. The keeper `eth_call`s it with the full
    mask to read per-band amounts, then sends a transaction covering only the bands worth the gas.
 4. `claim(token)` pays the creator. It collects first, so a creator never has to know whether their fees are
    already credited or still sitting in the positions.
 5. `sweepProtocol(assets[])` moves the protocol share to the buyback, on the operator's schedule.
 
-Steps 4 and 5 are deliberately independent. Nothing is pushed to a third party during someone else's call,
+Steps 4 and 5 are deliberately independent. Nothing is pushed to a final recipient during someone else's call,
 so a creator can claim at any time and the buyback job can run daily at its own convenience, and neither can
 block the other — a protocol fee recipient that cannot receive an asset never stops a creator being paid.
 `claimCredited(token)` skips the collect and pays only what is already credited, should `collect` itself ever

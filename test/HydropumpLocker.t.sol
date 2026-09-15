@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {HydropumpLocker} from "../contracts/HydropumpLocker.sol";
+import {HydropumpFeeEscrow} from "../contracts/HydropumpFeeEscrow.sol";
 import {HydropumpAddresses} from "../contracts/libraries/HydropumpAddresses.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockPositionManager} from "./mocks/MockPositionManager.sol";
@@ -14,6 +15,7 @@ contract HydropumpLockerTest is Test {
     address internal constant NPM = HydropumpAddresses.NONFUNGIBLE_POSITION_MANAGER;
 
     HydropumpLocker internal locker;
+    HydropumpFeeEscrow internal feeEscrow;
     MockPositionManager internal npm;
     MockERC20 internal launchToken;
     MockERC20 internal quote;
@@ -48,6 +50,10 @@ contract HydropumpLockerTest is Test {
                 )
             )
         );
+
+        feeEscrow = new HydropumpFeeEscrow(owner, address(locker));
+        vm.prank(owner);
+        locker.setFeeEscrow(address(feeEscrow));
 
         vm.prank(launcher);
         locker.registerLaunch(address(launchToken), address(quote), makeAddr("pool"), creator, creatorRecipient, ids);
@@ -201,6 +207,57 @@ contract HydropumpLockerTest is Test {
         assertEq(locker.creatorOwed(address(launchToken), address(quote)), 15_000);
         assertEq(locker.protocolOwed(address(launchToken)), 2_500);
         assertEq(locker.protocolOwed(address(quote)), 5_000);
+        assertEq(launchToken.balanceOf(address(locker)), 0, "locker should not custody credited fees");
+        assertEq(quote.balanceOf(address(locker)), 0, "locker should not custody credited fees");
+        assertEq(launchToken.balanceOf(address(feeEscrow)), 10_000);
+        assertEq(quote.balanceOf(address(feeEscrow)), 20_000);
+    }
+
+    function test_FeeEscrowCanOnlyBeConfiguredOnce() public {
+        HydropumpFeeEscrow replacement = new HydropumpFeeEscrow(owner, address(locker));
+        vm.prank(owner);
+        vm.expectRevert(HydropumpLocker.FeeEscrowAlreadySet.selector);
+        locker.setFeeEscrow(address(replacement));
+    }
+
+    function test_PreEscrowBalancesRemainClaimableAfterEscrowIsConfigured() public {
+        HydropumpLocker transitioningLocker = HydropumpLocker(
+            address(
+                new ERC1967Proxy(
+                    address(new HydropumpLocker()),
+                    abi.encodeCall(
+                        HydropumpLocker.initialize, (owner, launcher, buyback, uint64(7_500), uint64(2_500))
+                    )
+                )
+            )
+        );
+        uint256[] memory transitionIds = new uint256[](1);
+        transitionIds[0] = 77;
+        vm.prank(launcher);
+        transitioningLocker.registerLaunch(
+            address(launchToken), address(quote), makeAddr("transitionPool"), creator, creatorRecipient, transitionIds
+        );
+
+        _fund(77, 10_000, 8_000);
+        transitioningLocker.collect(address(launchToken), 1);
+        assertEq(launchToken.balanceOf(address(transitioningLocker)), 10_000);
+
+        HydropumpFeeEscrow transitionEscrow = new HydropumpFeeEscrow(owner, address(transitioningLocker));
+        vm.prank(owner);
+        transitioningLocker.setFeeEscrow(address(transitionEscrow));
+
+        assertEq(transitioningLocker.creatorOwed(address(launchToken), address(launchToken)), 7_500);
+        assertEq(transitioningLocker.protocolOwed(address(quote)), 2_000);
+
+        transitioningLocker.claimCredited(address(launchToken));
+        address[] memory assets = new address[](2);
+        (assets[0], assets[1]) = (address(launchToken), address(quote));
+        transitioningLocker.sweepProtocol(assets);
+
+        assertEq(launchToken.balanceOf(creatorRecipient), 7_500);
+        assertEq(quote.balanceOf(creatorRecipient), 6_000);
+        assertEq(launchToken.balanceOf(buyback), 2_500);
+        assertEq(quote.balanceOf(buyback), 2_000);
     }
 
     function test_CollectOnlyTouchesMaskedPositions() public {

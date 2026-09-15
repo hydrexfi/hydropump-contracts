@@ -11,6 +11,7 @@ import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Recei
 import {IHydropumpLocker} from "./interfaces/IHydropumpLocker.sol";
 import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionManager.sol";
 import {HydropumpAddresses} from "./libraries/HydropumpAddresses.sol";
+import {HydropumpFeeEscrow} from "./HydropumpFeeEscrow.sol";
 
 /// @title HydropumpLocker
 /// @notice Holds every launch's positions permanently and splits their fees.
@@ -22,6 +23,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
 
     /// @notice Cap on positions per launch, bounding `collect`'s loop and the mask width
     uint256 public constant MAX_POSITIONS = 12;
+    bytes32 public constant PROTOCOL_ACCOUNT = keccak256("HYDROPUMP_PROTOCOL_FEES");
 
     struct ClaimableFees {
         address launchToken;
@@ -53,19 +55,23 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     uint64 public protocolFee;
 
     mapping(address token => Launch) internal _launches;
-    mapping(address token => mapping(address asset => uint256 amount)) public creatorOwed;
+    /// @dev Legacy in-locker balances are retained in their original storage slots for upgrade safety.
+    mapping(address token => mapping(address asset => uint256 amount)) private _legacyCreatorOwed;
 
     /// @notice Protocol share awaiting the buyback, per asset. Pooled across launches: it all goes to one
     ///         place, so there is nothing to gain from tracking which launch produced it.
-    mapping(address asset => uint256 amount) public protocolOwed;
+    mapping(address asset => uint256 amount) private _legacyProtocolOwed;
 
     /// @notice Lifetime gross fees per launch. Kept in storage, unlike the split — which the events already
     ///         carry — because claiming zeroes `creatorOwed`, so nothing else survives to say what a launch
     ///         has earned. It is the only honest measure of a launch's real volume, and it is monotonic.
     mapping(address token => FeeTotals) public lifetimeFees;
 
+    /// @notice External custody and accounting for fees collected after it is configured.
+    HydropumpFeeEscrow public feeEscrow;
+
     /// @dev Reserved so added storage does not shift the layout. Keep vars + gap == 50.
-    uint256[44] private __gap;
+    uint256[43] private __gap;
 
     event LaunchRegistered(
         address indexed token,
@@ -93,6 +99,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     event FeeSplitUpdated(uint64 creatorFee, uint64 protocolFee);
     event LauncherUpdated(address indexed previousLauncher, address indexed newLauncher);
     event ProtocolFeeRecipientUpdated(address indexed previousRecipient, address indexed newRecipient);
+    event FeeEscrowSet(address indexed feeEscrow);
 
     error NotLauncher();
     error NotNFTPositionManager();
@@ -103,6 +110,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     error EmptyMask();
     error InvalidPositionCount();
     error InvalidFeeSplit();
+    error FeeEscrowAlreadySet();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -160,9 +168,29 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         return ClaimableFees({
             launchToken: token,
             quoteToken: quoteToken,
-            launchTokenAmount: creatorOwed[token][token],
-            quoteAmount: creatorOwed[token][quoteToken]
+            launchTokenAmount: creatorOwed(token, token),
+            quoteAmount: creatorOwed(token, quoteToken)
         });
+    }
+
+    function creatorAccount(address token) public pure returns (bytes32) {
+        return keccak256(abi.encode("HYDROPUMP_CREATOR_FEES", token));
+    }
+
+    /// @notice Creator balance across legacy locker storage and the external fee escrow.
+    function creatorOwed(address token, address asset) public view returns (uint256 amount) {
+        amount = _legacyCreatorOwed[token][asset];
+        if (address(feeEscrow) != address(0)) {
+            amount += feeEscrow.claimable(creatorAccount(token), asset);
+        }
+    }
+
+    /// @notice Protocol balance across legacy locker storage and the external fee escrow.
+    function protocolOwed(address asset) public view returns (uint256 amount) {
+        amount = _legacyProtocolOwed[asset];
+        if (address(feeEscrow) != address(0)) {
+            amount += feeEscrow.claimable(PROTOCOL_ACCOUNT, asset);
+        }
     }
 
     /// @notice `claimable` across several launches, for a creator page listing all of theirs at once.
@@ -288,8 +316,17 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         address recipient = launch.creatorRecipient;
         if (recipient == address(0)) revert UnknownLaunch();
 
-        amount0 = _payOut(token, token, recipient);
-        amount1 = _payOut(token, launch.quoteToken, recipient);
+        amount0 = _payOutLegacy(token, token, recipient);
+        amount1 = _payOutLegacy(token, launch.quoteToken, recipient);
+        if (address(feeEscrow) != address(0)) {
+            bytes32 account = creatorAccount(token);
+            uint256 escrowAmount0 = feeEscrow.claim(account, token);
+            uint256 escrowAmount1 = feeEscrow.claim(account, launch.quoteToken);
+            amount0 += escrowAmount0;
+            amount1 += escrowAmount1;
+            if (escrowAmount0 > 0) emit CreatorClaimed(token, recipient, token, escrowAmount0);
+            if (escrowAmount1 > 0) emit CreatorClaimed(token, recipient, launch.quoteToken, escrowAmount1);
+        }
     }
 
     /// @notice Move the accrued protocol share to the buyback. Permissionless; destination is fixed.
@@ -302,12 +339,16 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
 
         for (uint256 i = 0; i < assets.length; i++) {
             address asset = assets[i];
-            uint256 amount = protocolOwed[asset];
+            uint256 legacyAmount = _legacyProtocolOwed[asset];
+            uint256 amount = legacyAmount;
+            if (address(feeEscrow) != address(0)) {
+                amount += feeEscrow.claim(PROTOCOL_ACCOUNT, asset);
+            }
             if (amount == 0) continue;
 
-            protocolOwed[asset] = 0;
+            _legacyProtocolOwed[asset] = 0;
             amounts[i] = amount;
-            IERC20(asset).safeTransfer(recipient, amount);
+            if (legacyAmount > 0) IERC20(asset).safeTransfer(recipient, legacyAmount);
             emit ProtocolSwept(recipient, asset, amount);
         }
     }
@@ -319,6 +360,9 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
 
         emit CreatorRecipientUpdated(token, launch.creatorRecipient, newRecipient);
         launch.creatorRecipient = newRecipient;
+        if (address(feeEscrow) != address(0)) {
+            feeEscrow.setRecipient(creatorAccount(token), newRecipient);
+        }
     }
 
     function onERC721Received(address, address, uint256, bytes calldata) external view override returns (bytes4) {
@@ -340,20 +384,39 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         protocolAmount = amount - creatorAmount;
 
         if (creatorAmount > 0) {
-            creatorOwed[token][asset] += creatorAmount;
+            _credit(creatorAccount(token), _launches[token].creatorRecipient, token, asset, creatorAmount, true);
             emit CreatorAccrued(token, _launches[token].creatorRecipient, asset, creatorAmount);
         }
         if (protocolAmount > 0) {
-            protocolOwed[asset] += protocolAmount;
+            _credit(PROTOCOL_ACCOUNT, protocolFeeRecipient, token, asset, protocolAmount, false);
             emit ProtocolAccrued(asset, protocolAmount);
         }
     }
 
-    function _payOut(address token, address asset, address recipient) internal returns (uint256 amount) {
-        amount = creatorOwed[token][asset];
+    function _credit(
+        bytes32 account,
+        address recipient,
+        address token,
+        address asset,
+        uint256 amount,
+        bool creatorCredit
+    ) internal {
+        if (address(feeEscrow) == address(0)) {
+            if (creatorCredit) _legacyCreatorOwed[token][asset] += amount;
+            else _legacyProtocolOwed[asset] += amount;
+            return;
+        }
+
+        IERC20(asset).forceApprove(address(feeEscrow), amount);
+        feeEscrow.credit(account, recipient, asset, amount);
+        IERC20(asset).forceApprove(address(feeEscrow), 0);
+    }
+
+    function _payOutLegacy(address token, address asset, address recipient) internal returns (uint256 amount) {
+        amount = _legacyCreatorOwed[token][asset];
         if (amount == 0) return 0;
 
-        creatorOwed[token][asset] = 0;
+        _legacyCreatorOwed[token][asset] = 0;
         IERC20(asset).safeTransfer(recipient, amount);
         emit CreatorClaimed(token, recipient, asset, amount);
     }
@@ -386,5 +449,15 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         if (newRecipient == address(0)) revert ZeroAddress();
         emit ProtocolFeeRecipientUpdated(protocolFeeRecipient, newRecipient);
         protocolFeeRecipient = newRecipient;
+        if (address(feeEscrow) != address(0)) feeEscrow.setRecipient(PROTOCOL_ACCOUNT, newRecipient);
+    }
+
+    /// @notice Configure external fee custody once. Legacy credited balances remain claimable in the locker.
+    function setFeeEscrow(address newFeeEscrow) external onlyOwner {
+        if (address(feeEscrow) != address(0)) revert FeeEscrowAlreadySet();
+        if (newFeeEscrow == address(0) || newFeeEscrow.code.length == 0) revert ZeroAddress();
+        feeEscrow = HydropumpFeeEscrow(newFeeEscrow);
+        feeEscrow.setRecipient(PROTOCOL_ACCOUNT, protocolFeeRecipient);
+        emit FeeEscrowSet(newFeeEscrow);
     }
 }
