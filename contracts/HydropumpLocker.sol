@@ -31,6 +31,7 @@ contract HydropumpLocker is
     /// @notice Cap on positions per launch, bounding `collect`'s loop and the mask width
     uint256 public constant MAX_POSITIONS = 12;
     bytes32 public constant PROTOCOL_ACCOUNT = keccak256("HYDROPUMP_PROTOCOL_FEES");
+    uint8 public constant AUTO_LP_ROUTE = 1;
 
     struct ClaimableFees {
         address launchToken;
@@ -88,9 +89,10 @@ contract HydropumpLocker is
     mapping(address token => FeeAllocation allocation) public feeAllocation;
     /// @notice Lifetime fees assigned to active-band auto-LP, before compounding.
     mapping(address token => FeeTotals) public lifetimeAutoLpFees;
+    mapping(address token => IHydropumpLocker.FeeRoute[] routes) internal _feeRoutes;
 
     /// @dev Reserved so added storage does not shift the layout. Keep vars + gap == 50.
-    uint256[40] private __gap;
+    uint256[39] private __gap;
 
     event LaunchRegistered(
         address indexed token,
@@ -121,6 +123,7 @@ contract HydropumpLocker is
     event FeeEscrowSet(address indexed feeEscrow);
     event AutoLpStrategySet(address indexed token, address indexed strategy);
     event AutoLpAccrued(address indexed token, address indexed strategy, address indexed asset, uint256 amount);
+    event FeeRouteRegistered(address indexed token, uint8 indexed routeType, uint64 bps, address strategy);
     event LiquidityCompounded(
         address indexed token, uint256 indexed positionId, uint256 amount0, uint256 amount1, uint128 liquidity
     );
@@ -142,6 +145,8 @@ contract HydropumpLocker is
     error TickDeviationExceeded();
     error InvalidAutoLpFee();
     error FeeEscrowNotSet();
+    error UnsupportedFeeRoute();
+    error DuplicateFeeRoute();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -212,6 +217,10 @@ contract HydropumpLocker is
         return keccak256(abi.encode("HYDROPUMP_AUTO_LP_FEES", token));
     }
 
+    function getFeeRoutes(address token) external view returns (IHydropumpLocker.FeeRoute[] memory) {
+        return _feeRoutes[token];
+    }
+
     /// @notice Creator balance across legacy locker storage and the external fee escrow.
     function creatorOwed(address token, address asset) public view returns (uint256 amount) {
         amount = _legacyCreatorOwed[token][asset];
@@ -251,17 +260,26 @@ contract HydropumpLocker is
         _registerLaunch(token, quoteToken, pool, creator, creatorRecipient, positionIds, address(0), 0, 0, 0);
     }
 
-    function registerLaunchWithAutoLp(
+    function registerLaunchWithRoutes(
         address token,
         address quoteToken,
         address pool,
         address creator,
         address creatorRecipient,
         uint256[] calldata positionIds,
-        address strategy,
-        uint64 autoLpBps
+        IHydropumpLocker.FeeRoute[] calldata routes
     ) external {
-        if (strategy == address(0)) revert ZeroAddress();
+        uint64 autoLpBps;
+        address autoLpStrategy_;
+        for (uint256 i = 0; i < routes.length; i++) {
+            IHydropumpLocker.FeeRoute calldata route = routes[i];
+            if (route.routeType != AUTO_LP_ROUTE) revert UnsupportedFeeRoute();
+            if (autoLpStrategy_ != address(0)) revert DuplicateFeeRoute();
+            if (route.strategy == address(0) || route.bps == 0) revert InvalidAutoLpFee();
+            autoLpStrategy_ = route.strategy;
+            autoLpBps = route.bps;
+        }
+        if (autoLpStrategy_ == address(0)) revert InvalidAutoLpFee();
         uint256 totalFee = uint256(creatorFee) + protocolFee;
         uint64 protocolBps = uint64((uint256(protocolFee) * 10_000) / totalFee);
         uint64 creatorBps = 10_000 - protocolBps;
@@ -274,11 +292,15 @@ contract HydropumpLocker is
             creator,
             creatorRecipient,
             positionIds,
-            strategy,
+            autoLpStrategy_,
             autoLpBps,
             creatorBps - autoLpBps,
             protocolBps
         );
+        for (uint256 i = 0; i < routes.length; i++) {
+            _feeRoutes[token].push(routes[i]);
+            emit FeeRouteRegistered(token, routes[i].routeType, routes[i].bps, routes[i].strategy);
+        }
     }
 
     function _registerLaunch(

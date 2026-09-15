@@ -271,6 +271,34 @@ contract HydropumpLauncherTest is Test {
         impl.initialize(owner, admin, locker, address(autoLp), LAUNCH_FEE);
     }
 
+    function test_FeeRoutesRejectUnsupportedTypes() public {
+        HydropumpLauncher.FeeRouteConfig[] memory routes = new HydropumpLauncher.FeeRouteConfig[](1);
+        routes[0] = HydropumpLauncher.FeeRouteConfig({routeType: 2, bps: 1_000, config: ""});
+
+        vm.prank(creator);
+        vm.expectRevert(HydropumpLauncher.UnsupportedFeeRoute.selector);
+        launcher.launch{value: LAUNCH_FEE}(_params(bytes32(0)), routes);
+    }
+
+    function test_FeeRoutesRejectDuplicates() public {
+        HydropumpLauncher.FeeRouteConfig[] memory routes = new HydropumpLauncher.FeeRouteConfig[](2);
+        routes[0] = HydropumpLauncher.FeeRouteConfig({routeType: 1, bps: 500, config: ""});
+        routes[1] = HydropumpLauncher.FeeRouteConfig({routeType: 1, bps: 500, config: ""});
+
+        vm.prank(creator);
+        vm.expectRevert(HydropumpLauncher.DuplicateFeeRoute.selector);
+        launcher.launch{value: LAUNCH_FEE}(_params(bytes32(0)), routes);
+    }
+
+    function test_FeeRoutesRejectUnexpectedConfig() public {
+        HydropumpLauncher.FeeRouteConfig[] memory routes = new HydropumpLauncher.FeeRouteConfig[](1);
+        routes[0] = HydropumpLauncher.FeeRouteConfig({routeType: 1, bps: 500, config: hex"01"});
+
+        vm.prank(creator);
+        vm.expectRevert(HydropumpLauncher.InvalidFeeRouteConfig.selector);
+        launcher.launch{value: LAUNCH_FEE}(_params(bytes32(0)), routes);
+    }
+
     function _params(bytes32 salt) internal view returns (HydropumpLauncher.LaunchParams memory) {
         return HydropumpLauncher.LaunchParams({
             name: "Alpha",

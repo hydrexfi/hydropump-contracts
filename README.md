@@ -74,11 +74,17 @@ The split is stored, not hardcoded — `setFeeSplit` takes the two shares and on
 7500/2500 and 75/25 are the same thing. Changes apply to fees collected from then on; balances already
 credited are untouched.
 
-A creator can instead call `launchWithAutoLp(params, autoLpBps)` to permanently redirect part of the
-creator share to deeper liquidity. `autoLpBps` is an absolute share of collected LP fees, expressed out of
-10,000, and cannot exceed the creator's share. The Hydrex protocol share does not change. For example, with
-the default 75/25 split and `autoLpBps = 1000`, a pool charging 1% routes 0.65% of trade volume to the
-creator, 0.25% to Hydrex, and 0.10% to Auto-LP.
+A creator can pass a `FeeRouteConfig[]` to the overloaded `launch(params, routes)` function to assign parts
+of the creator share to built-in fee strategies. Each entry contains a registered `routeType`, its absolute
+share of collected LP fees in basis points, and strategy-specific configuration bytes. Any creator share
+not assigned to a route remains claimable by the creator. The Hydrex protocol share does not change.
+An empty array is equivalent to the simple `launch(params)` path.
+
+Auto-LP is the first supported route (`routeType = 1`) and currently requires empty `config`. For example,
+`FeeRouteConfig({routeType: 1, bps: 1000, config: ""})` permanently redirects 10% of collected fees to
+deeper liquidity. With the default 75/25 split, a pool charging 1% then routes 0.65% of trade volume to the
+creator, 0.25% to Hydrex, and 0.10% to Auto-LP. Unknown route types, duplicate strategy types, invalid
+configuration, and allocations exceeding the creator share revert at launch.
 
 Each opted-in launch receives its own minimal `HydropumpAutoLP` clone. Its escrow allocation is tracked by
 token, and the operator compounds it into the one existing locked position whose tick range contains the

@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {HydropumpLocker} from "../contracts/HydropumpLocker.sol";
+import {IHydropumpLocker} from "../contracts/interfaces/IHydropumpLocker.sol";
 import {HydropumpFeeEscrow} from "../contracts/HydropumpFeeEscrow.sol";
 import {HydropumpAddresses} from "../contracts/libraries/HydropumpAddresses.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
@@ -287,9 +288,10 @@ contract HydropumpLockerTest is Test {
         MockERC20 second = new MockERC20("Auto", "AUTO");
         uint256[] memory autoIds = new uint256[](1);
         autoIds[0] = 88;
+        IHydropumpLocker.FeeRoute[] memory routes = _autoLpRoutes(stranger, 1_000);
         vm.prank(launcher);
-        locker.registerLaunchWithAutoLp(
-            address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, stranger, 1_000
+        locker.registerLaunchWithRoutes(
+            address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, routes
         );
         npm.setPair(address(second), address(quote));
         second.mint(NPM, 10_000);
@@ -304,16 +306,45 @@ contract HydropumpLockerTest is Test {
         (uint128 lifetimeToken, uint128 lifetimeQuote) = locker.lifetimeAutoLpFees(address(second));
         assertEq(lifetimeToken, 1_000);
         assertEq(lifetimeQuote, 0);
+        IHydropumpLocker.FeeRoute[] memory storedRoutes = locker.getFeeRoutes(address(second));
+        assertEq(storedRoutes.length, 1);
+        assertEq(storedRoutes[0].routeType, 1);
+        assertEq(storedRoutes[0].bps, 1_000);
+        assertEq(storedRoutes[0].strategy, stranger);
     }
 
     function test_AutoLpCannotExceedCreatorAllocation() public {
         MockERC20 second = new MockERC20("Auto", "AUTO");
         uint256[] memory autoIds = new uint256[](1);
         autoIds[0] = 88;
+        IHydropumpLocker.FeeRoute[] memory routes = _autoLpRoutes(stranger, 7_501);
         vm.prank(launcher);
         vm.expectRevert(HydropumpLocker.InvalidAutoLpFee.selector);
-        locker.registerLaunchWithAutoLp(
-            address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, stranger, 7_501
+        locker.registerLaunchWithRoutes(
+            address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, routes
+        );
+    }
+
+    function test_LockerRejectsUnsupportedAndDuplicateRoutes() public {
+        MockERC20 second = new MockERC20("Auto", "AUTO");
+        uint256[] memory autoIds = new uint256[](1);
+        autoIds[0] = 88;
+        IHydropumpLocker.FeeRoute[] memory routes = _autoLpRoutes(stranger, 1_000);
+        routes[0].routeType = 2;
+
+        vm.prank(launcher);
+        vm.expectRevert(HydropumpLocker.UnsupportedFeeRoute.selector);
+        locker.registerLaunchWithRoutes(
+            address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, routes
+        );
+
+        routes = new IHydropumpLocker.FeeRoute[](2);
+        routes[0] = IHydropumpLocker.FeeRoute({routeType: 1, bps: 500, strategy: stranger});
+        routes[1] = IHydropumpLocker.FeeRoute({routeType: 1, bps: 500, strategy: stranger});
+        vm.prank(launcher);
+        vm.expectRevert(HydropumpLocker.DuplicateFeeRoute.selector);
+        locker.registerLaunchWithRoutes(
+            address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, routes
         );
     }
 
@@ -321,9 +352,10 @@ contract HydropumpLockerTest is Test {
         MockERC20 second = new MockERC20("Auto", "AUTO");
         uint256[] memory autoIds = new uint256[](1);
         autoIds[0] = 88;
+        IHydropumpLocker.FeeRoute[] memory routes = _autoLpRoutes(stranger, 1_000);
         vm.prank(launcher);
-        locker.registerLaunchWithAutoLp(
-            address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, stranger, 1_000
+        locker.registerLaunchWithRoutes(
+            address(second), address(quote), address(pool), creator, creatorRecipient, autoIds, routes
         );
 
         vm.prank(owner);
@@ -795,5 +827,14 @@ contract HydropumpLockerTest is Test {
             ) return true;
         }
         return false;
+    }
+
+    function _autoLpRoutes(address strategy, uint64 bps)
+        internal
+        pure
+        returns (IHydropumpLocker.FeeRoute[] memory routes)
+    {
+        routes = new IHydropumpLocker.FeeRoute[](1);
+        routes[0] = IHydropumpLocker.FeeRoute({routeType: 1, bps: bps, strategy: strategy});
     }
 }

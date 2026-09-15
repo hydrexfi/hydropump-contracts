@@ -30,6 +30,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     ISwapRouter public constant swapRouter = ISwapRouter(HydropumpAddresses.SWAP_ROUTER);
 
     uint256 public constant SUPPLY = 10_000_000_000e18;
+    uint8 public constant AUTO_LP_ROUTE = 1;
 
     struct PendingToken {
         string name;
@@ -51,6 +52,13 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         bytes32 userSalt;
         address creatorRecipient;
         uint256 buyAmount; // 0 to skip
+    }
+
+    /// @notice One use of the creator-controlled fee share. Unallocated bps remain with the creator.
+    struct FeeRouteConfig {
+        uint8 routeType;
+        uint64 bps;
+        bytes config;
     }
 
     address public locker;
@@ -101,6 +109,9 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     error TokenAddressMismatch();
     error QuoteConsumed();
     error AutoLpNotConfigured();
+    error UnsupportedFeeRoute();
+    error DuplicateFeeRoute();
+    error InvalidFeeRouteConfig();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -196,13 +207,20 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         return _launch(params, 0);
     }
 
-    /// @notice Launch with part of the creator allocation permanently assigned to active-band auto-LP.
-    function launchWithAutoLp(LaunchParams calldata params, uint64 autoLpBps)
+    /// @notice Launch with one or more built-in uses of the creator-controlled fee share.
+    function launch(LaunchParams calldata params, FeeRouteConfig[] calldata routes)
         external
         payable
         returns (address token, address pool, uint256[] memory positionIds)
     {
-        if (autoLpBps == 0) revert AutoLpNotConfigured();
+        uint64 autoLpBps;
+        for (uint256 i = 0; i < routes.length; i++) {
+            FeeRouteConfig calldata route = routes[i];
+            if (route.routeType != AUTO_LP_ROUTE) revert UnsupportedFeeRoute();
+            if (autoLpBps != 0) revert DuplicateFeeRoute();
+            if (route.bps == 0 || route.config.length != 0) revert InvalidFeeRouteConfig();
+            autoLpBps = route.bps;
+        }
         return _launch(params, autoLpBps);
     }
 
@@ -248,8 +266,10 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
             HydropumpAutoLP(strategy).initialize(
                 token, params.quoteToken, pool, locker, address(IHydropumpLocker(locker).feeEscrow()), admin, owner()
             );
-            IHydropumpLocker(locker).registerLaunchWithAutoLp(
-                token, params.quoteToken, pool, msg.sender, creatorRecipient, positionIds, strategy, autoLpBps
+            IHydropumpLocker.FeeRoute[] memory routes = new IHydropumpLocker.FeeRoute[](1);
+            routes[0] = IHydropumpLocker.FeeRoute({routeType: AUTO_LP_ROUTE, bps: autoLpBps, strategy: strategy});
+            IHydropumpLocker(locker).registerLaunchWithRoutes(
+                token, params.quoteToken, pool, msg.sender, creatorRecipient, positionIds, routes
             );
             emit AutoLpDeployed(token, strategy, autoLpBps);
         }

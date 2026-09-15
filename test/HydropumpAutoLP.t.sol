@@ -8,6 +8,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {HydropumpAutoLP} from "../contracts/HydropumpAutoLP.sol";
 import {HydropumpFeeEscrow} from "../contracts/HydropumpFeeEscrow.sol";
 import {HydropumpLocker} from "../contracts/HydropumpLocker.sol";
+import {IHydropumpLocker} from "../contracts/interfaces/IHydropumpLocker.sol";
 import {HydropumpAddresses} from "../contracts/libraries/HydropumpAddresses.sol";
 import {MockAlgebraPool} from "./mocks/MockAlgebraPool.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
@@ -55,10 +56,10 @@ contract HydropumpAutoLPTest is Test {
 
         uint256[] memory ids = new uint256[](2);
         (ids[0], ids[1]) = (1, 2);
+        IHydropumpLocker.FeeRoute[] memory routes = new IHydropumpLocker.FeeRoute[](1);
+        routes[0] = IHydropumpLocker.FeeRoute({routeType: 1, bps: 1_000, strategy: address(strategy)});
         vm.prank(launcher);
-        locker.registerLaunchWithAutoLp(
-            address(token), address(quote), address(pool), creator, creator, ids, address(strategy), 1_000
-        );
+        locker.registerLaunchWithRoutes(address(token), address(quote), address(pool), creator, creator, ids, routes);
         npm.setPosition(1, 100, 200);
         npm.setPosition(2, 200, 300);
     }
