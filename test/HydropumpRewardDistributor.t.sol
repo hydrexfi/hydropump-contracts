@@ -115,13 +115,15 @@ contract HydropumpRewardDistributorTest is Test {
     //  CLAIM
     // =============================
 
-    /// Permissionless, and always paid to the recipient — so the operator can push without anyone
-    /// having to come and collect, and pushing costs nobody their reward.
-    function test_AnyoneCanClaimButOnlyTheRecipientIsPaid() public {
+    /// Only the recipient can pull their own rewards, and they are always paid to themselves.
+    function test_OnlyTheRecipientCanClaim() public {
         _allocate(address(hydx), alice, 30e18, bob, 70e18);
 
         vm.prank(stranger);
-        uint256 paid = distributor.claim(alice, address(hydx));
+        assertEq(distributor.claim(address(hydx)), 0, "a stranger claims nothing");
+
+        vm.prank(alice);
+        uint256 paid = distributor.claim(address(hydx));
 
         assertEq(paid, 30e18);
         assertEq(hydx.balanceOf(alice), 30e18);
@@ -132,16 +134,20 @@ contract HydropumpRewardDistributorTest is Test {
 
     function test_ClaimingTwiceIsANoop() public {
         _one(address(hydx), alice, 10e18);
-        distributor.claim(alice, address(hydx));
-        assertEq(distributor.claim(alice, address(hydx)), 0);
+        vm.startPrank(alice);
+        distributor.claim(address(hydx));
+        assertEq(distributor.claim(address(hydx)), 0);
+        vm.stopPrank();
         assertEq(hydx.balanceOf(alice), 10e18);
     }
 
     function test_LifetimeSurvivesAClaim() public {
         _one(address(hydx), alice, 10e18);
-        distributor.claim(alice, address(hydx));
+        vm.prank(alice);
+        distributor.claim(address(hydx));
         _one(address(hydx), alice, 4e18);
-        distributor.claim(alice, address(hydx));
+        vm.prank(alice);
+        distributor.claim(address(hydx));
 
         assertEq(distributor.claimable(alice, address(hydx)), 0);
         assertEq(distributor.lifetimeClaimed(alice, address(hydx)), 14e18);
@@ -153,7 +159,8 @@ contract HydropumpRewardDistributorTest is Test {
 
         address[] memory tokens = new address[](2);
         (tokens[0], tokens[1]) = (address(hydx), address(other));
-        uint256[] memory amounts = distributor.claimMany(alice, tokens);
+        vm.prank(alice);
+        uint256[] memory amounts = distributor.claimMany(tokens);
 
         assertEq(amounts[0], 10e18);
         assertEq(amounts[1], 6e18);
@@ -166,7 +173,8 @@ contract HydropumpRewardDistributorTest is Test {
         _one(address(hydx), alice, 10e18);
         _one(address(other), alice, 6e18);
 
-        distributor.claim(alice, address(hydx));
+        vm.prank(alice);
+        distributor.claim(address(hydx));
 
         assertEq(distributor.claimable(alice, address(other)), 6e18, "the other token is untouched");
         assertEq(distributor.totalOwed(address(other)), 6e18);
@@ -226,8 +234,10 @@ contract HydropumpRewardDistributorTest is Test {
         vm.stopPrank();
 
         assertEq(hydx.balanceOf(owner), 30e18);
-        assertEq(distributor.claim(alice, address(hydx)), 0, "nothing left for alice");
-        assertEq(distributor.claim(bob, address(hydx)), 70e18, "and bob is still whole");
+        vm.prank(alice);
+        assertEq(distributor.claim(address(hydx)), 0, "nothing left for alice");
+        vm.prank(bob);
+        assertEq(distributor.claim(address(hydx)), 70e18, "and bob is still whole");
     }
 
     /// Unbounded on purpose: a hatch that respects the ledger is no use when the ledger is the problem.
@@ -241,8 +251,9 @@ contract HydropumpRewardDistributorTest is Test {
         assertEq(distributor.claimable(alice, address(hydx)), 10e18, "the ledger still says so");
 
         // And the claim fails on the transfer rather than half-paying.
+        vm.prank(alice);
         vm.expectRevert();
-        distributor.claim(alice, address(hydx));
+        distributor.claim(address(hydx));
     }
 
     function test_OwnerPowersAreOwnerOnly() public {
