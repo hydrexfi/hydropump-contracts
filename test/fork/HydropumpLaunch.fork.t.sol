@@ -1,278 +1,170 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {HydropumpLauncher} from "../../contracts/HydropumpLauncher.sol";
 import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
 import {IAlgebraPool} from "../../contracts/interfaces/IAlgebraPool.sol";
-import {INonfungiblePositionManager} from "../../contracts/interfaces/INonfungiblePositionManager.sol";
-import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.sol";
+import {FeeUses} from "../../contracts/libraries/FeeUses.sol";
+import {ForkFixture} from "./helpers/ForkFixture.sol";
 
-/// @notice Full launch against the live Hydrex deployment on Base.
-/// @dev Requires BASE_RPC_URL; skipped when unset so `forge test` stays offline-clean.
-contract HydropumpLaunchForkTest is Test {
-    INonfungiblePositionManager internal constant NPM =
-        INonfungiblePositionManager(HydropumpAddresses.NONFUNGIBLE_POSITION_MANAGER);
-    address internal constant WETH = HydropumpAddresses.WETH;
+/// @notice A full launch against the live Hydrex deployment on Base, on both sides of the pair.
+contract HydropumpLaunchForkTest is ForkFixture {
+    function test_LaunchSeedsTheCurveAndLocksEveryPositionAsToken0() public onlyForked {
+        (address token, address pool, uint256[] memory ids, address account) = _launchOnSide(WETH, true, bytes32(0));
 
-    /// @dev ETH at ~$4,000: $5k FDV over 10B supply is 1.25e-10 WETH per token, floored to the 200 spacing.
-    int24 internal constant WETH_START_TICK = -228_200;
+        assertLt(uint160(token), uint160(WETH));
+        assertEq(IAlgebraPool(pool).token0(), token, "launch token is token0");
+        assertEq(IAlgebraPool(pool).token1(), WETH);
+        assertEq(_currentTick(pool), WETH_START_TICK, "pool opens at the configured tick");
+        _assertCurveShape(token, WETH, pool, ids);
 
-    HydropumpLauncher internal launcher;
-    HydropumpLocker internal locker;
+        // Supply is what reached the pool, not what was minted: rounding left over from the bands is
+        // burnt rather than paid out, so the two are equal and both a hair under `SUPPLY()`.
+        assertEq(IERC20(token).totalSupply(), IERC20(token).balanceOf(pool), "all of it is in the pool");
+        assertLe(IERC20(token).totalSupply(), launcher.SUPPLY());
+        assertApproxEqRel(IERC20(token).totalSupply(), launcher.SUPPLY(), 1e12, "and only a hair under");
+        assertEq(IERC20(token).balanceOf(address(launcher)), 0, "launcher holds nothing after");
+        assertEq(IERC20(token).balanceOf(account), 0, "and the creator starts with none");
 
-    address internal owner = makeAddr("owner");
-    address internal creator = makeAddr("creator");
-    address internal buyback = makeAddr("buyback");
-
-    uint96 internal constant LAUNCH_FEE = 0.0005 ether;
-    uint256 internal saltCursor;
-    bool internal forked;
-
-    function setUp() public {
-        string memory rpc = vm.envOr("BASE_RPC_URL", string(""));
-        if (bytes(rpc).length == 0) return;
-        vm.createSelectFork(rpc);
-        forked = true;
-        vm.deal(creator, 100 ether);
-
-        locker = HydropumpLocker(
-            address(
-                new ERC1967Proxy(
-                    address(new HydropumpLocker()),
-                    abi.encodeCall(
-                        HydropumpLocker.initialize, (owner, address(0), buyback, uint64(7_500), uint64(2_500))
-                    )
-                )
-            )
-        );
-        launcher = HydropumpLauncher(
-            address(
-                new ERC1967Proxy(
-                    address(new HydropumpLauncher()),
-                    abi.encodeCall(HydropumpLauncher.initialize, (owner, owner, address(locker), LAUNCH_FEE))
-                )
-            )
-        );
-
-        vm.startPrank(owner);
-        locker.setLauncher(address(launcher));
-        address[] memory quotes = new address[](1);
-        bool[] memory enabled = new bool[](1);
-        int24[] memory ticks = new int24[](1);
-        (quotes[0], enabled[0], ticks[0]) = (WETH, true, WETH_START_TICK);
-        launcher.configureQuoteTokens(quotes, enabled, ticks);
-        vm.stopPrank();
-    }
-
-    /// @dev Advances a cursor: CREATE2 is deterministic, so reusing a salt resolves to an address that
-    ///      already has a token deployed at it.
-    function _mineSalt(address deployer) internal returns (bytes32 salt) {
-        for (uint256 i = saltCursor; i < saltCursor + 20_000; i++) {
-            salt = bytes32(i);
-            if (launcher.isSaltValid(deployer, salt, WETH)) {
-                saltCursor = i + 1;
-                return salt;
-            }
-        }
-        revert("no salt found");
-    }
-
-    function test_LaunchSeedsTheCurveAndLocksEveryPosition() public {
-        if (!forked) {
-            vm.skip(true);
-        }
-
-        bytes32 salt = _mineSalt(creator);
-
-        vm.prank(creator);
-        (address token, address pool, uint256[] memory positionIds) = launcher.launch{value: LAUNCH_FEE}(
-            HydropumpLauncher.LaunchParams({
-                name: "Alpha",
-                symbol: "ALPHA",
-                quoteToken: WETH,
-                userSalt: salt,
-                creatorRecipient: creator,
-                buyAmount: 0
-            })
-        );
-
-        // --- token0 invariant ---
-        assertLt(uint160(token), uint160(WETH), "token must sort below the quote");
-        assertEq(IAlgebraPool(pool).token0(), token, "launch token must be token0");
-        assertEq(IAlgebraPool(pool).token1(), WETH, "quote must be token1");
-
-        // --- pool opened at the configured start tick ---
-        (, int24 currentTick,,,,) = IAlgebraPool(pool).globalState();
-        assertEq(currentTick, WETH_START_TICK, "pool must open at the configured start tick");
-
-        // --- the launch never needed a single wei of quote ---
-        assertEq(IERC20(WETH).balanceOf(address(launcher)), 0);
-        assertEq(IERC20(WETH).balanceOf(address(locker)), 0, "single-sided: no quote in any position");
-
-        // --- full supply deployed, nothing stranded in the launcher ---
-        assertEq(IERC20(token).totalSupply(), launcher.SUPPLY());
-        assertEq(IERC20(token).balanceOf(address(launcher)), 0, "launcher must hold nothing after launch");
-        uint256 dust = IERC20(token).balanceOf(creator);
-        // Liquidity math rounds down per band; the remainder refunded to the creator is a rounding artefact,
-        // not a meaningful allocation. 1e12 wei is one millionth of one token out of a 10B supply.
-        assertLt(dust, 1e12, "mint remainder refunded to the creator must be dust");
-        assertApproxEqRel(IERC20(token).balanceOf(pool), launcher.SUPPLY(), 1e12, "supply must sit in the pool");
-
-        // --- five bands, all locked, monotonic and contiguous ---
-        int24 spacing = IAlgebraPool(pool).tickSpacing();
-        int24 previousUpper;
-        uint128 totalLiquidity;
-        for (uint256 i = 0; i < 5; i++) {
-            (,,,,, int24 tickLower, int24 tickUpper, uint128 liquidity,,,,) = NPM.positions(positionIds[i]);
-
-            assertEq(NPM.ownerOf(positionIds[i]), address(locker), "position must be locked");
-            assertGt(liquidity, 0, "band must hold liquidity");
-            assertGe(tickLower, currentTick, "band must sit at or above the current tick");
-            assertEq(tickLower % spacing, 0, "band must align to spacing");
-            assertEq(tickUpper % spacing, 0, "band must align to spacing");
-            if (i > 0) assertEq(tickLower, previousUpper, "bands must be contiguous");
-            previousUpper = tickUpper;
-            totalLiquidity += liquidity;
-        }
-        assertGt(totalLiquidity, 0);
-
-        // --- the locker knows the launch ---
         HydropumpLocker.Launch memory launch = locker.getLaunch(token);
         assertEq(launch.pool, pool);
-        assertEq(launch.creator, creator);
-        assertEq(launch.creatorRecipient, creator);
-        assertEq(launch.positionIds[4], positionIds[4]);
+        assertEq(launch.creator, account);
 
-        console2.log("token", token);
-        console2.log("pool ", pool);
-        console2.log("tick spacing", int256(spacing));
-        console2.log("creator dust refund", dust);
+        console2.log("token0 launch", token);
+        console2.log("pool         ", pool);
     }
 
-    function test_LaunchWithBuyFillsInTheSameTransaction() public {
-        if (!forked) {
-            vm.skip(true);
-        }
+    /// The same launch with the token above the quote. Algebra sorts the pair by address, so the pool opens
+    /// at the negated tick and the bands descend from it — the same ladder, reflected.
+    function test_LaunchSeedsTheCurveAndLocksEveryPositionAsToken1() public onlyForked {
+        (address token, address pool, uint256[] memory ids,) = _launchOnSide(WETH, false, bytes32(0));
 
+        assertGt(uint160(token), uint160(WETH));
+        assertEq(IAlgebraPool(pool).token0(), WETH);
+        assertEq(IAlgebraPool(pool).token1(), token, "launch token is token1");
+        assertEq(_currentTick(pool), -WETH_START_TICK, "pool opens at the negated tick");
+        _assertCurveShape(token, WETH, pool, ids);
+
+        console2.log("token1 launch", token);
+        console2.log("pool         ", pool);
+    }
+
+    /// The two orientations have to open at the same price in quote terms, or a launch would be worth a
+    /// different amount depending on an address it does not control.
+    function test_BothOrientationsOpenAtTheSamePrice() public onlyForked {
+        (address up, address upPool,,) = _launchOnSide(WETH, true, bytes32(0));
+        (address down, address downPool,,) = _launchOnSide(WETH, false, bytes32(0));
+
+        assertEq(_currentTick(downPool), -_currentTick(upPool), "opening ticks must be reciprocal");
+        assertApproxEqRel(
+            _priceE18(upPool, up, WETH), _priceE18(downPool, down, WETH), 0.0002e18, "price survives the mirror"
+        );
+    }
+
+    /// HYDX at 0x00000e7e... is the quote the mirror exists for: nothing can sort below it, so before this
+    /// it was only launchable after roughly 1.16M keccaks of salt mining. Now it just launches.
+    function test_AQuoteNothingCanSortBelowLaunchesImmediately() public onlyForked {
+        (address token, address pool, uint256[] memory ids) = _launchFrom(creator, HYDX, bytes32(0), 0);
+
+        assertGt(uint160(token), uint160(HYDX), "no address sorts below HYDX in practice");
+        assertEq(_currentTick(pool), -HYDX_START_TICK);
+        _assertCurveShape(token, HYDX, pool, ids);
+
+        console2.log("HYDX-quoted launch", token);
+    }
+
+    /// There is nothing to supply, nothing to mine, and nothing to predict. An address comes out of
+    /// `CREATE` and the `Launched` event is where anyone finds out what it was.
+    function test_AddressesAreOnlyKnowableAfterTheFact() public onlyForked {
+        vm.recordLogs();
+        (address token,,) = _launchFrom(creator, WETH, bytes32(0), 0);
+
+        bytes32 signature =
+            keccak256("Launched(address,address,address,address,int24,uint256[],string,string,bytes32,uint64)");
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] != signature) continue;
+            found = true;
+            assertEq(address(uint160(uint256(logs[i].topics[1]))), token);
+        }
+        assertTrue(found, "the launch must announce its address");
+        assertGt(token.code.length, 0);
+
+        // And a second launch is simply a different address, with nothing shared between them.
+        (address second,,) = _launchFrom(creator, WETH, bytes32(0), 0);
+        assertTrue(second != token);
+    }
+
+    function test_TheDevBuyFillsInTheSameTransactionOnBothSides() public onlyForked {
         uint256 buyAmount = 0.05 ether;
-        deal(WETH, creator, buyAmount);
 
-        bytes32 salt = _mineSalt(creator);
+        _arrangeSide(WETH, true);
+        address upAccount = creator;
+        (address token, address pool,) = _launchFrom(upAccount, WETH, bytes32(0), buyAmount);
+        assertGt(IERC20(token).balanceOf(upAccount), 0, "buyer receives tokens");
+        assertEq(IERC20(WETH).balanceOf(address(launcher)), 0, "no quote stranded");
+        assertEq(IERC20(WETH).balanceOf(pool), buyAmount, "quote landed in the pool");
+        assertGt(_currentTick(pool), WETH_START_TICK, "buying token0 raises token1/token0");
+        uint256 upFill = IERC20(token).balanceOf(upAccount);
 
-        vm.startPrank(creator);
-        IERC20(WETH).approve(address(launcher), buyAmount);
-        (address token, address pool,) = launcher.launch{value: LAUNCH_FEE}(
-            HydropumpLauncher.LaunchParams({
-                name: "Alpha",
-                symbol: "ALPHA",
-                quoteToken: WETH,
-                userSalt: salt,
-                creatorRecipient: creator,
-                buyAmount: buyAmount
-            })
-        );
-        vm.stopPrank();
+        _arrangeSide(WETH, false);
+        address downAccount = creator;
+        (address mirrored, address mirroredPool,) = _launchFrom(downAccount, WETH, bytes32(0), buyAmount);
+        assertGt(IERC20(mirrored).balanceOf(downAccount), 0);
+        assertEq(IERC20(WETH).balanceOf(mirroredPool), buyAmount);
+        assertLt(_currentTick(mirroredPool), -WETH_START_TICK, "buying token1 lowers it");
 
-        assertGt(IERC20(token).balanceOf(creator), 0, "buyer must receive tokens");
-        assertEq(IERC20(WETH).balanceOf(creator), 0, "full buy amount must be spent");
-        assertEq(IERC20(WETH).balanceOf(address(launcher)), 0, "no quote may be left in the launcher");
-        assertEq(IERC20(WETH).balanceOf(pool), buyAmount, "quote must land in the pool");
-
-        (, int24 tickAfter,,,,) = IAlgebraPool(pool).globalState();
-        assertGt(tickAfter, WETH_START_TICK, "the buy must move the price up");
+        // Opposite directions on the tick, the same thing economically — and the same fill, because either
+        // side of the price is the same ladder.
+        assertApproxEqRel(IERC20(mirrored).balanceOf(downAccount), upFill, 0.005e18, "fills must match");
     }
 
-    function test_ZeroBuyAmountSkipsTheSwap() public {
-        if (!forked) {
-            vm.skip(true);
-        }
+    /// A gauged Hydrex CL pool runs at communityFee 1000/1000, which would send every swap fee to the
+    /// community vault and leave the locked positions — and so every fee use — with nothing.
+    function test_LaunchPoolsAreNotGaugedOnEitherSide() public onlyForked {
+        (, address pool,,) = _launchOnSide(WETH, true, bytes32(0));
+        (,,,, uint16 communityFee,) = IAlgebraPool(pool).globalState();
+        assertEq(communityFee, 0, "launch pools must keep fees with the LP");
 
-        bytes32 salt = _mineSalt(creator);
-        vm.prank(creator);
-        (address token, address pool,) = launcher.launch{value: LAUNCH_FEE}(
-            HydropumpLauncher.LaunchParams({
-                name: "Alpha",
-                symbol: "ALPHA",
-                quoteToken: WETH,
-                userSalt: salt,
-                creatorRecipient: creator,
-                buyAmount: 0
-            })
-        );
-
-        assertEq(IERC20(WETH).balanceOf(pool), 0, "no quote should enter the pool");
-        assertLt(IERC20(token).balanceOf(creator), 1e12, "creator gets mint dust only, no bought tokens");
-
-        (, int24 tickAfter,,,,) = IAlgebraPool(pool).globalState();
-        assertEq(tickAfter, WETH_START_TICK);
+        (, address mirroredPool,,) = _launchOnSide(WETH, false, bytes32(0));
+        (,,,, uint16 mirroredCommunityFee,) = IAlgebraPool(mirroredPool).globalState();
+        assertEq(mirroredCommunityFee, 0);
     }
 
-    function test_LaunchFeeAccumulatesAndIsClaimable() public {
-        if (!forked) {
-            vm.skip(true);
-        }
+    function test_LaunchFeeAccumulatesAndIsClaimable() public onlyForked {
+        _launchFrom(creator, WETH, bytes32(0), 0);
+        assertEq(address(launcher).balance, LAUNCH_FEE);
 
-        bytes32 salt = _mineSalt(creator);
-        vm.prank(creator);
-        launcher.launch{value: LAUNCH_FEE}(
-            HydropumpLauncher.LaunchParams({
-                name: "Alpha",
-                symbol: "ALPHA",
-                quoteToken: WETH,
-                userSalt: salt,
-                creatorRecipient: creator,
-                buyAmount: 0
-            })
-        );
-
-        assertEq(address(launcher).balance, LAUNCH_FEE, "fee stays in the launcher");
-
-        // Overpayment is accepted and kept, not refunded.
         uint256 surplus = 0.002 ether;
-        bytes32 salt2 = _mineSalt(creator);
         vm.prank(creator);
         launcher.launch{value: LAUNCH_FEE + surplus}(
             HydropumpLauncher.LaunchParams({
-                name: "Beta", symbol: "BETA", quoteToken: WETH, userSalt: salt2, creatorRecipient: creator, buyAmount: 0
+                name: "Beta",
+                symbol: "BETA",
+                quoteToken: WETH,
+                creatorRecipient: creator,
+                buyAmount: 0,
+                feeUse: bytes32(0)
             })
         );
         assertEq(address(launcher).balance, LAUNCH_FEE * 2 + surplus, "surplus is kept");
 
         address sink = makeAddr("sink");
-        vm.prank(owner);
-        uint256 claimed = launcher.claimLaunchFees(sink);
-
-        assertEq(claimed, LAUNCH_FEE * 2 + surplus);
+        vm.prank(admin);
+        assertEq(launcher.claimLaunchFees(sink), LAUNCH_FEE * 2 + surplus);
         assertEq(sink.balance, LAUNCH_FEE * 2 + surplus);
-        assertEq(address(launcher).balance, 0);
     }
 
-    function test_LaunchPoolIsNotGauged() public {
-        if (!forked) {
-            vm.skip(true);
-        }
+    function test_AFeeUseChosenAtLaunchIsRecorded() public onlyForked {
+        (address token,,) = _launchFrom(creator, WETH, FeeUses.BUYBACK_BURN, 0);
 
-        bytes32 salt = _mineSalt(creator);
-        vm.prank(creator);
-        (, address pool,) = launcher.launch{value: LAUNCH_FEE}(
-            HydropumpLauncher.LaunchParams({
-                name: "Alpha",
-                symbol: "ALPHA",
-                quoteToken: WETH,
-                userSalt: salt,
-                creatorRecipient: creator,
-                buyAmount: 0
-            })
-        );
-
-        // A gauged Hydrex CL pool runs at communityFee 1000/1000, which would send 100% of swap fees to the
-        // community vault and leave the locked positions — and so the creator and the buyback — with nothing.
-        (,,,, uint16 communityFee,) = IAlgebraPool(pool).globalState();
-        assertEq(communityFee, 0, "launch pools must keep fees with the LP");
+        assertEq(registry.feeUseOf(token), FeeUses.BUYBACK_BURN);
+        assertEq(registry.implementationFor(token), address(buybackBurn));
     }
 }

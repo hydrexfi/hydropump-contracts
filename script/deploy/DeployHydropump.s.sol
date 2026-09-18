@@ -8,17 +8,29 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {HydropumpLauncher} from "../../contracts/HydropumpLauncher.sol";
 import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
 import {HydropumpBuyback} from "../../contracts/HydropumpBuyback.sol";
+import {PairDirectory} from "../../contracts/PairDirectory.sol";
+import {FeeUseRegistry} from "../../contracts/FeeUseRegistry.sol";
+import {CreatorBalanceFeeUse} from "../../contracts/feeuses/CreatorBalanceFeeUse.sol";
+import {AutoLpFeeUse} from "../../contracts/feeuses/AutoLpFeeUse.sol";
+import {BuybackBurnFeeUse} from "../../contracts/feeuses/BuybackBurnFeeUse.sol";
+import {FeeUses} from "../../contracts/libraries/FeeUses.sol";
 import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.sol";
 
 /// @title DeployHydropump
 /// @dev Two identities, nothing else to configure:
-///        deployer  (DEPLOYER_KEY)      also the operator — owns the launcher, runs the jobs
-///        admin     (HYDROPUMP_ADMIN)   the Safe — upgrades, and owns the locker and buyback
-///      The locker and launcher reference each other, so the locker goes up under the deployer, gets wired,
-///      and is then handed to the admin.
+///        deployer  (DEPLOYER_KEY)      also the operator — owns the directory and launcher, runs the jobs
+///        admin     (HYDROPUMP_ADMIN)   the Safe — upgrades, and owns the locker, registry and buyback
+///
+///      Order is forced by the references. The registry needs the launcher, the launcher needs the locker
+///      and directory, and the fee uses need the locker — so everything goes up under the deployer,
+///      gets wired, and is handed to the admin last.
+///
+///      The launcher is deployed with the deployer as its own admin and reassigned at the end. Its pointer
+///      setters are admin-gated on purpose — repointing the locker or the directory is as powerful as an
+///      upgrade — and that same gate would otherwise stop the deployer wiring the registry in.
 contract DeployHydropump is Script {
-    uint64 internal constant CREATOR_FEE = 7_500; // 75% of collected fees
-    uint64 internal constant PROTOCOL_FEE = 2_500; // 25%, funds the HYDX buyback
+    uint64 internal constant CREATOR_FEE = 7_500; // 75%, to whatever the launch's fee use spends it on
+    uint64 internal constant PROTOCOL_FEE = 2_500; // 25%, converted to the quote and held for the buyback
     uint96 internal constant LAUNCH_FEE = 0.00001 ether; // anti-spam, claimable by the admin
 
     function run() public {
@@ -33,8 +45,18 @@ contract DeployHydropump is Script {
 
         vm.startBroadcast(deployerKey);
 
+        // --- the pieces that reference nothing ---
         HydropumpBuyback buyback = new HydropumpBuyback(admin, deployer, HydropumpAddresses.HYDX, gaugeBribe);
 
+        PairDirectory directory = PairDirectory(
+            address(
+                new ERC1967Proxy(
+                    address(new PairDirectory()), abi.encodeCall(PairDirectory.initialize, (deployer, admin))
+                )
+            )
+        );
+
+        // --- locker, then launcher, then registry: each needs the one before it ---
         HydropumpLocker locker = HydropumpLocker(
             address(
                 new ERC1967Proxy(
@@ -50,22 +72,65 @@ contract DeployHydropump is Script {
             address(
                 new ERC1967Proxy(
                     address(new HydropumpLauncher()),
-                    abi.encodeCall(HydropumpLauncher.initialize, (deployer, admin, address(locker), LAUNCH_FEE))
+                    abi.encodeCall(
+                        HydropumpLauncher.initialize,
+                        // Admin is the deployer for the length of this script; handed over below.
+                        (deployer, deployer, address(locker), address(directory), LAUNCH_FEE)
+                    )
                 )
             )
         );
 
+        FeeUseRegistry registry = FeeUseRegistry(
+            address(
+                new ERC1967Proxy(
+                    address(new FeeUseRegistry()),
+                    abi.encodeCall(FeeUseRegistry.initialize, (deployer, address(launcher)))
+                )
+            )
+        );
+
+        // --- the three things a creator share can be spent on ---
+        // No owner on any of them: they hold nothing between calls, so there is nothing to administer
+        // and nothing to rescue.
+        CreatorBalanceFeeUse creatorBalance = new CreatorBalanceFeeUse(address(locker));
+        AutoLpFeeUse autoLp = new AutoLpFeeUse(address(locker));
+        BuybackBurnFeeUse buybackBurn = new BuybackBurnFeeUse(address(locker));
+
+        registry.registerFeeUse(FeeUses.CREATOR_BALANCE, address(creatorBalance));
+        registry.registerFeeUse(FeeUses.AUTO_LP, address(autoLp));
+        registry.registerFeeUse(FeeUses.BUYBACK_BURN, address(buybackBurn));
+        registry.setDefaultFeeUse(FeeUses.CREATOR_BALANCE);
+
+        // --- wire the back-references, then hand over ---
         locker.setLauncher(address(launcher));
+        locker.setFeeUseRegistry(address(registry));
+        launcher.setFeeUseRegistry(address(registry));
+
+        // Ownable2Step for the two the admin owns outright, so the Safe has to accept. The launcher's admin
+        // is a plain reassignment — there is no two-step for it, and losing it would brick the upgrade path,
+        // so it goes last and is asserted afterwards.
         locker.transferOwnership(admin);
+        registry.transferOwnership(admin);
+        launcher.setAdmin(admin);
+
+        require(launcher.admin() == admin, "launcher admin handover failed");
+        require(directory.admin() == admin, "directory admin handover failed");
 
         vm.stopBroadcast();
 
         console2.log("\n=== Deployed ===");
-        console2.log("HydropumpLauncher:", address(launcher));
-        console2.log("HydropumpLocker:  ", address(locker));
-        console2.log("HydropumpBuyback: ", address(buyback));
-        console2.log("Launch fee (wei):  ", uint256(LAUNCH_FEE));
-        console2.log("\nSet LAUNCHER_ADDRESS in .env, then: npm run quotes:build && npm run quotes:register:base");
-        console2.log("From the Safe: accept the locker ownership transfer (Ownable2Step).");
+        console2.log("PairDirectory:       ", address(directory));
+        console2.log("HydropumpLauncher:   ", address(launcher));
+        console2.log("HydropumpLocker:     ", address(locker));
+        console2.log("FeeUseRegistry:      ", address(registry));
+        console2.log("CreatorBalanceFeeUse:", address(creatorBalance));
+        console2.log("AutoLpFeeUse:        ", address(autoLp));
+        console2.log("BuybackBurnFeeUse:   ", address(buybackBurn));
+        console2.log("HydropumpBuyback:    ", address(buyback));
+        console2.log("Launch fee (wei):    ", uint256(LAUNCH_FEE));
+        console2.log("\nSet LAUNCHER_ADDRESS and PAIR_DIRECTORY_ADDRESS in .env, then:");
+        console2.log("  npm run quotes:build && npm run quotes:register:base");
+        console2.log("From the Safe: accept the locker and registry ownership transfers (Ownable2Step).");
     }
 }

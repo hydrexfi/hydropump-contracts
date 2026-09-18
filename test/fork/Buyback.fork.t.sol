@@ -23,6 +23,13 @@ interface IBribeView {
 contract BuybackForkTest is Test {
     IERC20 internal constant HYDX = IERC20(HydropumpAddresses.HYDX);
     address internal constant GAUGE_BRIBE = HydropumpAddresses.GAUGE_BRIBE;
+    address internal constant KYBER_ROUTER = HydropumpAddresses.KYBER_ROUTER;
+    address internal constant WETH = HydropumpAddresses.WETH;
+
+    /// @dev Block the pinned route was quoted at, and the address it names as sender and recipient.
+    uint256 internal constant ROUTE_BLOCK = 51_453_947;
+    address internal constant ROUTE_RECIPIENT = 0xE3c2e65e0B7126E0F3485a2deE8e14eb1b9D91BA;
+    string internal constant ROUTE_FILE = "script/fixtures/kyber-weth-hydx.txt";
 
     HydropumpBuyback internal buyback;
 
@@ -74,6 +81,91 @@ contract BuybackForkTest is Test {
         console2.log("epoch          ", epoch);
         console2.log("HYDX bribed    ", sent);
         console2.log("epoch rewards  ", rewardsAfter);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                              THE SWAP LEG
+    //////////////////////////////////////////////////////////////*/
+
+    /// The daily job, against the real aggregator: sell the quote asset for HYDX and bribe the gauge.
+    ///
+    /// Pinned, because the route is real KyberSwap calldata captured at that block — the aggregator
+    /// builds it off-chain and it is only valid where it was quoted. It bakes in its recipient too,
+    /// which is why the contract is deployed to the address the route names rather than a fresh one.
+    ///
+    /// This is the leg the mocked unit tests cannot cover: whether the router we point at actually
+    /// accepts what the aggregator hands us. It did not, once — the address was Hydrex's MultiRouter
+    /// proxy, which takes its own ABI rather than raw aggregator calldata, and every swap reverted.
+    function test_SellsQuoteForHydxThroughTheLiveAggregator() public {
+        if (!forked) {
+            vm.skip(true);
+        }
+        vm.createSelectFork(vm.envString("BASE_RPC_URL"), ROUTE_BLOCK);
+
+        HydropumpBuyback pinned = HydropumpBuyback(ROUTE_RECIPIENT);
+        deployCodeTo(
+            "HydropumpBuyback.sol:HydropumpBuyback",
+            abi.encode(admin, operator, address(HYDX), GAUGE_BRIBE),
+            ROUTE_RECIPIENT
+        );
+
+        uint256 amountIn = 0.1 ether;
+        deal(WETH, address(pinned), amountIn);
+        assertEq(pinned.router(), KYBER_ROUTER, "the default target must be the aggregator itself");
+
+        HydropumpBuyback.SwapData[] memory swaps = new HydropumpBuyback.SwapData[](1);
+        swaps[0] = HydropumpBuyback.SwapData({
+            inputToken: WETH,
+            amountIn: amountIn,
+            routerCalldata: vm.parseBytes(vm.readFile(ROUTE_FILE)),
+            minHydxOut: 8_000e18 // the quote was ~8474 HYDX; a loose floor, since this is not a price test
+        });
+
+        vm.prank(operator);
+        uint256 bought = pinned.buyback(swaps);
+
+        assertGt(bought, 8_000e18, "the route must actually fill");
+        assertEq(IERC20(WETH).balanceOf(address(pinned)), 0, "and spend the whole input");
+        assertEq(IERC20(WETH).allowance(address(pinned), KYBER_ROUTER), 0, "leaving no standing approval");
+
+        // And straight on into the gauge, which is the whole point of the job.
+        uint256 bribeBefore = HYDX.balanceOf(GAUGE_BRIBE);
+        uint256 sent = pinned.bribe();
+
+        assertEq(sent, bought, "everything bought is bribed");
+        assertEq(HYDX.balanceOf(address(pinned)), 0, "nothing retained");
+        assertEq(HYDX.balanceOf(GAUGE_BRIBE), bribeBefore + bought);
+
+        console2.log("WETH in ", amountIn);
+        console2.log("HYDX out", bought);
+    }
+
+    /// The bound is the only protection on an arbitrary route, so it has to bite against the real router.
+    function test_TheBoundBitesOnARealRoute() public {
+        if (!forked) {
+            vm.skip(true);
+        }
+        vm.createSelectFork(vm.envString("BASE_RPC_URL"), ROUTE_BLOCK);
+
+        HydropumpBuyback pinned = HydropumpBuyback(ROUTE_RECIPIENT);
+        deployCodeTo(
+            "HydropumpBuyback.sol:HydropumpBuyback",
+            abi.encode(admin, operator, address(HYDX), GAUGE_BRIBE),
+            ROUTE_RECIPIENT
+        );
+        deal(WETH, address(pinned), 0.1 ether);
+
+        HydropumpBuyback.SwapData[] memory swaps = new HydropumpBuyback.SwapData[](1);
+        swaps[0] = HydropumpBuyback.SwapData({
+            inputToken: WETH,
+            amountIn: 0.1 ether,
+            routerCalldata: vm.parseBytes(vm.readFile(ROUTE_FILE)),
+            minHydxOut: 1_000_000e18 // far above what the route can fill
+        });
+
+        vm.prank(operator);
+        vm.expectRevert(HydropumpBuyback.InsufficientOutput.selector);
+        pinned.buyback(swaps);
     }
 
     function test_BribeRevertsWhenTargetUnset() public {

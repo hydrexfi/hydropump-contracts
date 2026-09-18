@@ -10,3 +10,4 @@ node_modules
 /frontend/.env
 /frontend/.env.local
 /frontend
+/cache

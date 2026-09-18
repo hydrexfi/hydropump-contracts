@@ -4,31 +4,27 @@ pragma solidity 0.8.26;
 import {Test} from "forge-std/Test.sol";
 import {HydropumpToken} from "../contracts/HydropumpToken.sol";
 
-/// @dev Stands in for the launcher: exposes `pendingToken()` for the token's argument-less constructor.
+/// @dev Stands in for the launcher. The whole supply is minted to whoever deploys, so a test that wants
+///      the balance somewhere else forwards it on — which is what the launcher does too.
 contract TokenDeployer {
-    string public pendingName;
-    string public pendingSymbol;
-    uint256 public pendingSupply;
-    address public pendingRecipient;
-
-    function pendingToken() external view returns (string memory, string memory, uint256, address) {
-        return (pendingName, pendingSymbol, pendingSupply, pendingRecipient);
-    }
-
     function deploy(string memory name_, string memory symbol_, uint256 supply, address to)
         external
-        returns (HydropumpToken)
+        returns (HydropumpToken token)
     {
-        (pendingName, pendingSymbol, pendingSupply, pendingRecipient) = (name_, symbol_, supply, to);
-        return new HydropumpToken();
+        token = new HydropumpToken(name_, symbol_, supply);
+        if (to != address(this)) token.transfer(to, supply);
     }
 
     function deployAt(string memory name_, string memory symbol_, uint256 supply, address to, bytes32 salt)
         external
-        returns (HydropumpToken)
+        returns (HydropumpToken token)
     {
-        (pendingName, pendingSymbol, pendingSupply, pendingRecipient) = (name_, symbol_, supply, to);
-        return new HydropumpToken{salt: salt}();
+        token = new HydropumpToken{salt: salt}(name_, symbol_, supply);
+        if (to != address(this)) token.transfer(to, supply);
+    }
+
+    function initCodeHash(string memory name_, string memory symbol_, uint256 supply) external pure returns (bytes32) {
+        return keccak256(abi.encodePacked(type(HydropumpToken).creationCode, abi.encode(name_, symbol_, supply)));
     }
 }
 
@@ -42,7 +38,7 @@ contract HydropumpTokenTest is Test {
         deployer = new TokenDeployer();
     }
 
-    function test_ConstructorReadsParamsBackFromDeployer() public {
+    function test_ConstructorTakesItsParametersDirectly() public {
         HydropumpToken token = deployer.deploy("Alpha", "ALPHA", 10_000_000_000e18, alice);
 
         assertEq(token.name(), "Alpha");
@@ -85,20 +81,22 @@ contract HydropumpTokenTest is Test {
         assertEq(token.totalSupply(), 1e18);
     }
 
-    function test_InitCodeHashIsConstantAcrossDifferentParams() public {
-        // This is what makes salt mining possible before the user picks a name.
-        bytes32 hashA = keccak256(type(HydropumpToken).creationCode);
+    /// The constructor arguments are part of the init code, so the address a launch lands at depends on
+    /// its name and symbol. That is deliberate: it means nobody can work out an address — or squat it with
+    /// a pre-made pool — until the launch that uses it is already in flight.
+    function test_InitCodeHashTracksTheNameAndSymbol() public view {
+        bytes32 alpha = deployer.initCodeHash("Alpha", "ALPHA", 1e18);
 
-        deployer.deploy("Alpha", "ALPHA", 1e18, alice);
-        deployer.deploy("A Very Much Longer Token Name", "LONGER", 99e18, bob);
-
-        assertEq(keccak256(type(HydropumpToken).creationCode), hashA);
+        assertTrue(alpha != deployer.initCodeHash("Beta", "ALPHA", 1e18), "a different name moves it");
+        assertTrue(alpha != deployer.initCodeHash("Alpha", "BETA", 1e18), "so does a different symbol");
+        assertTrue(alpha != deployer.initCodeHash("Alpha", "ALPHA", 2e18), "and a different supply");
+        assertEq(alpha, deployer.initCodeHash("Alpha", "ALPHA", 1e18), "and it is stable for the same ones");
     }
 
     function test_Create2AddressMatchesThePrediction() public {
         bytes32 salt = keccak256("salt");
         address predicted =
-            vm.computeCreate2Address(salt, keccak256(type(HydropumpToken).creationCode), address(deployer));
+            vm.computeCreate2Address(salt, deployer.initCodeHash("Alpha", "ALPHA", 1e18), address(deployer));
 
         HydropumpToken token = deployer.deployAt("Alpha", "ALPHA", 1e18, alice, salt);
 

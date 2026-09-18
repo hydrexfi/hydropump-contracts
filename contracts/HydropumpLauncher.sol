@@ -4,12 +4,13 @@ pragma solidity 0.8.26;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {HydropumpToken} from "./HydropumpToken.sol";
 import {IHydropumpLocker} from "./interfaces/IHydropumpLocker.sol";
+import {IPairDirectory} from "./interfaces/IPairDirectory.sol";
+import {IFeeUseRegistry} from "./interfaces/IFeeUseRegistry.sol";
 import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionManager.sol";
 import {IAlgebraPool} from "./interfaces/IAlgebraPool.sol";
 import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
@@ -29,39 +30,23 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
 
     uint256 public constant SUPPLY = 10_000_000_000e18;
 
-    struct PendingToken {
-        string name;
-        string symbol;
-        uint256 supply;
-        address recipient;
-    }
-
-    struct QuoteConfig {
-        bool enabled;
-        int24 startTick;
-        uint64 updatedAt;
-    }
-
     struct LaunchParams {
         string name;
         string symbol;
         address quoteToken;
-        bytes32 userSalt;
         address creatorRecipient;
         uint256 buyAmount; // 0 to skip
+        bytes32 feeUse;
     }
 
     address public locker;
     uint96 public launchFee;
     address public admin;
-
-    mapping(address quoteToken => QuoteConfig) public quoteTokens;
-
-    /// @dev Set for the duration of one `launch` so the token's argument-less constructor can read it back.
-    PendingToken private _pendingToken;
+    address public pairDirectory;
+    address public feeUseRegistry;
 
     /// @dev Reserved so added storage does not shift the layout. Keep vars + gap == 50.
-    uint256[43] private __gap;
+    uint256[46] private __gap;
 
     event Launched(
         address indexed token,
@@ -72,27 +57,25 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         uint256[] positionIds,
         string name,
         string symbol,
+        bytes32 feeUse,
         uint64 timestamp
     );
     event LaunchBought(address indexed token, address indexed buyer, uint256 quoteIn, uint256 tokensOut);
     event LaunchFeeUpdated(uint96 previousFee, uint96 newFee);
     event LaunchFeesClaimed(address indexed to, uint256 amount);
-    event QuoteTokenConfigured(address indexed quoteToken, bool enabled, int24 startTick);
-    event StartTickUpdated(address indexed quoteToken, int24 previousTick, int24 newTick);
     event AdminUpdated(address indexed previousAdmin, address indexed newAdmin);
     event LockerUpdated(address indexed previousLocker, address indexed newLocker);
+    event PairDirectoryUpdated(address indexed previousDirectory, address indexed newDirectory);
+    event FeeUseRegistryUpdated(address indexed previousRegistry, address indexed newRegistry);
 
-    error QuoteTokenNotEnabled();
-    error TokenNotBelowQuote();
     error NotAdmin();
     error ZeroAddress();
-    error LengthMismatch();
-    error StartTickUnset();
     error PoolCreationFailed();
     error InsufficientLaunchFee();
     error TransferFailed();
-    error TokenAddressMismatch();
     error QuoteConsumed();
+    error BandOutOfRange();
+    error DirectoryUnset();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -102,22 +85,24 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         _disableInitializers();
     }
 
-    function initialize(
-        address _owner,
-        address _admin,
-        address _locker,
-        uint96 _launchFee
-    ) external initializer {
-        if (_owner == address(0) || _admin == address(0) || _locker == address(0)) revert ZeroAddress();
+    function initialize(address _owner, address _admin, address _locker, address _pairDirectory, uint96 _launchFee)
+        external
+        initializer
+    {
+        if (_owner == address(0) || _admin == address(0) || _locker == address(0) || _pairDirectory == address(0)) {
+            revert ZeroAddress();
+        }
         __Ownable_init(_owner);
         __Ownable2Step_init();
 
         admin = _admin;
         locker = _locker;
+        pairDirectory = _pairDirectory;
         launchFee = _launchFee;
 
         emit AdminUpdated(address(0), _admin);
         emit LockerUpdated(address(0), _locker);
+        emit PairDirectoryUpdated(address(0), _pairDirectory);
         emit LaunchFeeUpdated(0, _launchFee);
     }
 
@@ -130,42 +115,33 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
                                  READ
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Address a launch token will land at, so the frontend can mine `userSalt` up front.
-    /// @dev The init code hash is constant, so a salt can be mined before the user picks a name. A salt
-    ///      mined for one sender is invalid for another, which stops a mempool watcher burning it.
-    function predictToken(address deployer, bytes32 userSalt) public view returns (address) {
-        return Create2.computeAddress(_finalSalt(deployer, userSalt), tokenInitCodeHash(), address(this));
+    /// @notice Whether the launch token sits on the token0 side of its pool, which is what decides the
+    ///         direction the curve is mirrored in.
+    function launchIsToken0(address token, address quoteToken) public pure returns (bool) {
+        return token < quoteToken;
     }
 
-    /// @notice Whether a salt yields a token that sorts below `quoteToken`, i.e. one the pool will treat
-    ///         as token0. The frontend bumps the salt until this holds.
-    function isSaltValid(
-        address deployer,
-        bytes32 userSalt,
-        address quoteToken
-    ) external view returns (bool) {
-        return predictToken(deployer, userSalt) < quoteToken;
+    /// @notice The tick the pool for this pair will actually open at.
+    /// @dev Delegated to the directory, which is where a quote's price lives. Kept here so a frontend that
+    ///      already holds the launcher address does not need a second one to preview a launch.
+    function poolStartTick(address token, address quoteToken) public view returns (int24) {
+        return IPairDirectory(pairDirectory).requirePoolStartTick(token, quoteToken);
     }
 
-    /// @notice Constant across launches — the token constructor takes no arguments — so a salt mined once
-    ///         stays valid regardless of the name and symbol the user later picks.
-    function tokenInitCodeHash() public pure returns (bytes32) {
-        return keccak256(type(HydropumpToken).creationCode);
-    }
-
-    /// @notice Read by a HydropumpToken's constructor, mid-`launch`. Empty at rest.
-    function pendingToken() external view returns (string memory, string memory, uint256, address) {
-        PendingToken storage pending = _pendingToken;
-        return (pending.name, pending.symbol, pending.supply, pending.recipient);
+    /// @notice Whether a quote token can be launched against right now.
+    function isQuoteEnabled(address quoteToken) external view returns (bool) {
+        return IPairDirectory(pairDirectory).isEnabled(quoteToken);
     }
 
     function bandCount() public pure returns (uint256) {
         return 5;
     }
 
-    /// @notice Band `i` as tick offsets from the start tick, plus its share of supply in bps.
+    /// @notice Band `i` as unsigned tick distances from the start tick, plus its share of supply in bps.
     /// @dev Offsets, never absolute ticks: a tick encodes a raw wei ratio and shifts with the quote token's
-    ///      decimals and price. Shares sum to 10000.
+    ///      decimals and price. Unsigned, never signed: the direction they run in is not a property of the
+    ///      curve but of which side of the pair the launch token landed on, and `_mintBands` applies it.
+    ///      Band 0 is always the one adjacent to the start price. Shares sum to 10000.
     function band(uint256 i) public pure returns (int24 offsetLower, int24 offsetUpper, uint256 shareBps) {
         if (i == 0) return (0, 14_000, 900);
         if (i == 1) return (14_000, 36_000, 2_200);
@@ -178,63 +154,56 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
                               USER WRITE
     //////////////////////////////////////////////////////////////*/
 
-    function launch(
-        LaunchParams calldata params
-    ) external payable returns (address token, address pool, uint256[] memory positionIds) {
+    function launch(LaunchParams calldata params)
+        external
+        payable
+        returns (address token, address pool, uint256[] memory positionIds)
+    {
         // A minimum, and any surplus is kept. No refund path means no call back into the caller here.
         if (msg.value < launchFee) revert InsufficientLaunchFee();
 
-        QuoteConfig memory quote = quoteTokens[params.quoteToken];
-        if (!quote.enabled) revert QuoteTokenNotEnabled();
-        if (quote.updatedAt == 0) revert StartTickUnset();
+        address directory = pairDirectory;
+        if (directory == address(0)) revert DirectoryUnset();
 
-        bytes32 salt = _finalSalt(msg.sender, params.userSalt);
-        token = Create2.computeAddress(salt, tokenInitCodeHash(), address(this));
-        if (token >= params.quoteToken) revert TokenNotBelowQuote();
+        token = address(new HydropumpToken(params.name, params.symbol, SUPPLY));
 
-        _pendingToken = PendingToken(params.name, params.symbol, SUPPLY, address(this));
-        if (address(new HydropumpToken{salt: salt}()) != token) {
-            revert TokenAddressMismatch();
-        }
-        delete _pendingToken;
+        bool isToken0 = token < params.quoteToken;
+        int24 startTick = IPairDirectory(directory).requirePoolStartTick(token, params.quoteToken);
+
+        (address token0, address token1) = isToken0 ? (token, params.quoteToken) : (params.quoteToken, token);
 
         pool = nonfungiblePositionManager.createAndInitializePoolIfNecessary(
-            token,
-            params.quoteToken,
-            address(0),
-            TickMath.getSqrtRatioAtTick(quote.startTick),
-            ""
+            token0, token1, address(0), TickMath.getSqrtRatioAtTick(startTick), ""
         );
         if (pool == address(0)) revert PoolCreationFailed();
 
-        positionIds = _mintBands(token, params.quoteToken, pool, quote.startTick);
+        positionIds = _mintBands(token, params.quoteToken, pool, startTick, isToken0);
 
         if (params.buyAmount > 0) _buy(token, params.quoteToken, params.buyAmount);
 
-        address creatorRecipient = params.creatorRecipient == address(0)
-            ? msg.sender
-            : params.creatorRecipient;
-        IHydropumpLocker(locker).registerLaunch(
-            token,
-            params.quoteToken,
-            pool,
-            msg.sender,
-            creatorRecipient,
-            positionIds
-        );
+        address creatorRecipient = params.creatorRecipient == address(0) ? msg.sender : params.creatorRecipient;
+        IHydropumpLocker(locker)
+            .registerLaunch(token, params.quoteToken, pool, msg.sender, creatorRecipient, positionIds);
 
+        if (feeUseRegistry != address(0)) {
+            IFeeUseRegistry(feeUseRegistry).setLaunchFeeUse(token, params.feeUse);
+        }
+
+        // Rounding from minting five bands. Burnt rather than paid out, so a launch's supply is only
+        // ever what reached the pool and nobody starts holding a balance they did not buy.
         uint256 dust = IERC20(token).balanceOf(address(this));
-        if (dust > 0) IERC20(token).safeTransfer(msg.sender, dust);
+        if (dust > 0) HydropumpToken(token).burn(dust);
 
         emit Launched(
             token,
             msg.sender,
             params.quoteToken,
             pool,
-            quote.startTick,
+            startTick,
             positionIds,
             params.name,
             params.symbol,
+            params.feeUse,
             uint64(block.timestamp)
         );
     }
@@ -243,9 +212,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
                                INTERNAL
     //////////////////////////////////////////////////////////////*/
 
-    /// @dev Buys the launch token with the caller's quote, straight after the curve is seeded. No minimum
-    ///      out: the pool is created in this same transaction at a start tick fixed before it, so the fill
-    ///      is deterministic and there is no position for anyone to trade against first.
+    /// @dev Buys the launch token with the caller's quote, straight after the curve is seeded.
     function _buy(address token, address quoteToken, uint256 buyAmount) internal {
         IERC20(quoteToken).safeTransferFrom(msg.sender, address(this), buyAmount);
         IERC20(quoteToken).forceApprove(address(swapRouter), buyAmount);
@@ -267,57 +234,67 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         emit LaunchBought(token, msg.sender, buyAmount, tokensOut);
     }
 
-    /// @dev Bands are aligned to the pool's actual tick spacing and all sit at or above the current tick, so
-    ///      every mint is pure token0 — asserted via `QuoteConsumed`, not assumed.
-    function _mintBands(
-        address token,
-        address quoteToken,
-        address pool,
-        int24 startTick
-    ) internal returns (uint256[] memory positionIds) {
+    /// @dev Bands are aligned to the pool's actual tick spacing and all sit on the launch token's side of the
+    ///      current tick, so every mint is pure launch token.
+    function _mintBands(address token, address quoteToken, address pool, int24 startTick, bool isToken0)
+        internal
+        returns (uint256[] memory positionIds)
+    {
         uint256 count = bandCount();
         positionIds = new uint256[](count);
 
         int24 spacing = IAlgebraPool(pool).tickSpacing();
         int24 maxUsable = (TickMath.MAX_TICK / spacing) * spacing;
-        int24 base = _ceilToSpacing(startTick, spacing);
+        int24 base = isToken0 ? _ceilToSpacing(startTick, spacing) : _floorToSpacing(startTick, spacing);
+
+        (address token0, address token1) = isToken0 ? (token, quoteToken) : (quoteToken, token);
 
         IERC20(token).forceApprove(address(nonfungiblePositionManager), SUPPLY);
 
         uint256 assigned;
         for (uint256 i = 0; i < count; i++) {
             (int24 offsetLower, int24 offsetUpper, uint256 shareBps) = band(i);
+            int24 nearOffset = _floorToSpacing(offsetLower, spacing);
+            int24 farOffset = _floorToSpacing(offsetUpper, spacing);
 
-            int24 tickUpper = base + _floorToSpacing(offsetUpper, spacing);
-            if (tickUpper > maxUsable) tickUpper = maxUsable;
+            int24 tickLower;
+            int24 tickUpper;
+            if (isToken0) {
+                tickLower = base + nearOffset;
+                tickUpper = base + farOffset;
+                if (tickUpper > maxUsable) tickUpper = maxUsable;
+            } else {
+                tickUpper = base - nearOffset;
+                tickLower = base - farOffset;
+                if (tickLower < -maxUsable) tickLower = -maxUsable;
+            }
+            // Only reachable from a start tick so close to the usable edge that the tail clamps past its own
+            // lower bound. Caught here rather than left to fail somewhere inside the position manager.
+            if (tickLower >= tickUpper) revert BandOutOfRange();
 
             uint256 amount = i == count - 1 ? SUPPLY - assigned : (SUPPLY * shareBps) / 10_000;
             assigned += amount;
 
-            (uint256 positionId, , , uint256 quoteUsed) = nonfungiblePositionManager.mint(
+            (uint256 positionId,, uint256 used0, uint256 used1) = nonfungiblePositionManager.mint(
                 INonfungiblePositionManager.MintParams({
-                    token0: token,
-                    token1: quoteToken,
+                    token0: token0,
+                    token1: token1,
                     deployer: address(0),
-                    tickLower: base + _floorToSpacing(offsetLower, spacing),
+                    tickLower: tickLower,
                     tickUpper: tickUpper,
-                    amount0Desired: amount,
-                    amount1Desired: 0,
+                    amount0Desired: isToken0 ? amount : 0,
+                    amount1Desired: isToken0 ? 0 : amount,
                     amount0Min: 0,
                     amount1Min: 0,
                     recipient: locker,
                     deadline: block.timestamp
                 })
             );
-            if (quoteUsed != 0) revert QuoteConsumed();
+            if ((isToken0 ? used1 : used0) != 0) revert QuoteConsumed();
             positionIds[i] = positionId;
         }
 
         IERC20(token).forceApprove(address(nonfungiblePositionManager), 0);
-    }
-
-    function _finalSalt(address deployer, bytes32 userSalt) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(deployer, userSalt));
     }
 
     /// @dev Solidity's `/` truncates toward zero, so negative ticks need the explicit floor.
@@ -332,54 +309,12 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         return floored == tick ? tick : floored + spacing;
     }
 
-    function _setStartTick(address quoteToken, int24 startTick) internal {
-        QuoteConfig storage quote = quoteTokens[quoteToken];
-        if (!quote.enabled) revert QuoteTokenNotEnabled();
-
-        emit StartTickUpdated(quoteToken, quote.startTick, startTick);
-        quote.startTick = startTick;
-        quote.updatedAt = uint64(block.timestamp);
-    }
-
     function _authorizeUpgrade(address) internal override onlyAdmin {}
 
     /*//////////////////////////////////////////////////////////////
                                 ADMIN
     //////////////////////////////////////////////////////////////*/
 
-    function configureQuoteTokens(
-        address[] calldata quoteTokenList,
-        bool[] calldata enabledList,
-        int24[] calldata startTickList
-    ) external onlyOwner {
-        uint256 length = quoteTokenList.length;
-        if (length != enabledList.length || length != startTickList.length) revert LengthMismatch();
-
-        for (uint256 i = 0; i < length; i++) {
-            address quoteToken = quoteTokenList[i];
-            if (quoteToken == address(0)) revert ZeroAddress();
-
-            quoteTokens[quoteToken] = QuoteConfig({
-                enabled: enabledList[i],
-                startTick: startTickList[i],
-                updatedAt: uint64(block.timestamp)
-            });
-            emit QuoteTokenConfigured(quoteToken, enabledList[i], startTickList[i]);
-        }
-    }
-
-    function setStartTicks(
-        address[] calldata quoteTokenList,
-        int24[] calldata startTickList
-    ) external onlyOwner {
-        if (quoteTokenList.length != startTickList.length) revert LengthMismatch();
-        for (uint256 i = 0; i < quoteTokenList.length; i++) {
-            _setStartTick(quoteTokenList[i], startTickList[i]);
-        }
-    }
-
-    /// @dev Admin-gated, not owner-gated: if the owner could hand itself the admin role it would have the
-    ///      upgrade path too, and the split would be decorative.
     function setAdmin(address newAdmin) external onlyAdmin {
         if (newAdmin == address(0)) revert ZeroAddress();
         emit AdminUpdated(admin, newAdmin);
@@ -396,7 +331,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         if (to == address(0)) revert ZeroAddress();
 
         amount = address(this).balance;
-        (bool ok, ) = to.call{value: amount}("");
+        (bool ok,) = to.call{value: amount}("");
         if (!ok) revert TransferFailed();
 
         emit LaunchFeesClaimed(to, amount);
@@ -408,5 +343,20 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         if (newLocker == address(0)) revert ZeroAddress();
         emit LockerUpdated(locker, newLocker);
         locker = newLocker;
+    }
+
+    /// @dev Admin-gated. The directory sets the price every launch opens at, so repointing it is the same
+    ///      authority as repointing the curve itself — not something the daily refresh key should hold.
+    function setPairDirectory(address newDirectory) external onlyAdmin {
+        if (newDirectory == address(0)) revert ZeroAddress();
+        emit PairDirectoryUpdated(pairDirectory, newDirectory);
+        pairDirectory = newDirectory;
+    }
+
+    /// @dev Allowed to be zero: a launcher with no registry still launches, it just leaves every launch
+    ///      on whatever default the registry is later given.
+    function setFeeUseRegistry(address newRegistry) external onlyAdmin {
+        emit FeeUseRegistryUpdated(feeUseRegistry, newRegistry);
+        feeUseRegistry = newRegistry;
     }
 }

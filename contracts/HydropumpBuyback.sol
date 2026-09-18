@@ -15,7 +15,12 @@ contract HydropumpBuyback is Ownable2Step {
     using SafeERC20 for IERC20;
 
     IERC20 public immutable HYDX;
-    address public constant MULTI_ROUTER = HydropumpAddresses.MULTI_ROUTER;
+
+    /// @notice Where `routerCalldata` is sent. KyberSwap's aggregator by default.
+    /// @dev Settable rather than constant because KyberSwap versions its router, and a swap leg that
+    ///      cannot follow it would strand the protocol's fees. Owner-only: the operator supplies the
+    ///      calldata, so letting them also choose the target would make this an arbitrary-call contract.
+    address public router = HydropumpAddresses.KYBER_ROUTER;
 
     struct SwapData {
         address inputToken;
@@ -31,6 +36,7 @@ contract HydropumpBuyback is Ownable2Step {
     address public gaugeBribe;
 
     event Swapped(address indexed inputToken, uint256 amountIn, uint256 hydxOut);
+    event RouterUpdated(address indexed previousRouter, address indexed newRouter);
     event BribePlaced(address indexed gaugeBribe, uint256 hydxAmount, uint64 indexed epoch);
     event OperatorUpdated(address indexed previousOperator, address indexed newOperator);
     event GaugeBribeUpdated(address indexed previousBribe, address indexed newBribe);
@@ -70,15 +76,41 @@ contract HydropumpBuyback is Ownable2Step {
     /// @notice Convert held balances into HYDX along off-chain routes.
     /// @dev Operator-gated: `routerCalldata` is arbitrary and `minHydxOut` is the only slippage bound, so an
     ///      open caller could pass a zero bound and sandwich the trade.
+    ///
+    ///      Build each route with this contract as both sender and recipient — the output is measured as
+    ///      the change in this contract's own HYDX balance, so a route that pays out anywhere else
+    ///      reads as zero and trips the bound.
     function buyback(SwapData[] calldata swaps) external onlyOperator returns (uint256 totalHydxOut) {
         for (uint256 i = 0; i < swaps.length; i++) {
             totalHydxOut += _swap(swaps[i]);
         }
     }
 
+    /// @notice The daily job: sell everything along the given routes and bribe the proceeds in one call.
+    /// @dev Nothing forces these apart — `bribe` reads this contract's balance, and the swaps have already
+    ///      credited it by the time it runs. Kept callable separately too: `bribe` alone sends HYDX that is
+    ///      already here, and `buyback` alone is useful when the gauge is mid-migration.
+    ///
+    ///      Reverts as a whole if either half fails, so a bribe that cannot land leaves the HYDX unsold
+    ///      rather than sitting here waiting for someone to notice.
+    function buybackAndBribe(SwapData[] calldata swaps)
+        external
+        onlyOperator
+        returns (uint256 totalHydxOut, uint256 bribed)
+    {
+        for (uint256 i = 0; i < swaps.length; i++) {
+            totalHydxOut += _swap(swaps[i]);
+        }
+        bribed = _bribe();
+    }
+
     /// @notice Deposit the full HYDX balance into the Hydropump gauge's bribe contract.
     /// @dev Permissionless: the destination is fixed, so the HYDX cannot be stranded by one operator.
     function bribe() external returns (uint256 amount) {
+        return _bribe();
+    }
+
+    function _bribe() internal returns (uint256 amount) {
         if (gaugeBribe == address(0)) revert GaugeBribeNotSet();
 
         amount = HYDX.balanceOf(address(this));
@@ -97,9 +129,10 @@ contract HydropumpBuyback is Ownable2Step {
     function _swap(SwapData calldata swap) internal returns (uint256 hydxOut) {
         uint256 balanceBefore = HYDX.balanceOf(address(this));
 
-        IERC20(swap.inputToken).forceApprove(MULTI_ROUTER, swap.amountIn);
-        (bool success,) = MULTI_ROUTER.call(swap.routerCalldata);
-        IERC20(swap.inputToken).forceApprove(MULTI_ROUTER, 0);
+        address target = router;
+        IERC20(swap.inputToken).forceApprove(target, swap.amountIn);
+        (bool success,) = target.call(swap.routerCalldata);
+        IERC20(swap.inputToken).forceApprove(target, 0);
         if (!success) revert SwapFailed();
 
         hydxOut = HYDX.balanceOf(address(this)) - balanceBefore;
@@ -115,6 +148,12 @@ contract HydropumpBuyback is Ownable2Step {
     function setOperator(address newOperator) external onlyOwner {
         emit OperatorUpdated(operator, newOperator);
         operator = newOperator;
+    }
+
+    function setRouter(address newRouter) external onlyOwner {
+        if (newRouter == address(0)) revert ZeroAddress();
+        emit RouterUpdated(router, newRouter);
+        router = newRouter;
     }
 
     function setGaugeBribe(address newGaugeBribe) external onlyOwner {

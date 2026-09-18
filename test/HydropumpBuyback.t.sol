@@ -33,8 +33,8 @@ contract HydropumpBuybackTest is Test {
         weth = new MockERC20("Wrapped Ether", "WETH");
         usdc = new MockERC20("USD Coin", "USDC");
         // The router is a constant on the contract, so put the mock's code at that address.
-        vm.etch(HydropumpAddresses.MULTI_ROUTER, address(new MockRouter()).code);
-        router = MockRouter(HydropumpAddresses.MULTI_ROUTER);
+        vm.etch(HydropumpAddresses.KYBER_ROUTER, address(new MockRouter()).code);
+        router = MockRouter(HydropumpAddresses.KYBER_ROUTER);
         gaugeBribe = new MockBribe();
 
         buyback = new HydropumpBuyback(owner, operator, address(hydx), address(gaugeBribe));
@@ -86,7 +86,7 @@ contract HydropumpBuybackTest is Test {
     }
 
     function test_RouterIsHardcoded() public view {
-        assertEq(buyback.MULTI_ROUTER(), HydropumpAddresses.MULTI_ROUTER);
+        assertEq(buyback.router(), HydropumpAddresses.KYBER_ROUTER);
     }
 
     function test_RevertsWhenOutputMissesTheBound() public {
@@ -141,6 +141,46 @@ contract HydropumpBuybackTest is Test {
         assertEq(gaugeBribe.received(address(hydx)), 42e18);
         assertEq(hydx.balanceOf(address(buyback)), 0);
         assertEq(hydx.balanceOf(stranger), 0);
+    }
+
+    /// The daily job is one call, not two — the swaps have credited this contract by the time the bribe
+    /// reads its balance, so nothing forces them apart.
+    function test_BuybackAndBribeIsOneTransaction() public {
+        weth.mint(address(buyback), 1e18);
+
+        HydropumpBuyback.SwapData[] memory swaps = new HydropumpBuyback.SwapData[](1);
+        swaps[0] = _swapData(weth, 1e18, 500e18, 500e18);
+
+        vm.prank(operator);
+        (uint256 bought, uint256 bribed) = buyback.buybackAndBribe(swaps);
+
+        assertEq(bought, 500e18, "the swaps filled");
+        assertEq(bribed, 500e18, "and went straight out");
+        assertEq(hydx.balanceOf(address(buyback)), 0, "nothing retained");
+        assertEq(hydx.balanceOf(address(gaugeBribe)), 500e18);
+    }
+
+    /// HYDX already sitting here goes out with the rest, so a run that failed halfway self-heals.
+    function test_BuybackAndBribeIncludesHydxAlreadyHeld() public {
+        weth.mint(address(buyback), 1e18);
+        hydx.mint(address(buyback), 40e18); // left over from an earlier run
+
+        HydropumpBuyback.SwapData[] memory swaps = new HydropumpBuyback.SwapData[](1);
+        swaps[0] = _swapData(weth, 1e18, 500e18, 500e18);
+
+        vm.prank(operator);
+        (uint256 bought, uint256 bribed) = buyback.buybackAndBribe(swaps);
+
+        assertEq(bought, 500e18, "only the swap output counts as bought");
+        assertEq(bribed, 540e18, "but everything held is bribed");
+    }
+
+    function test_BuybackAndBribeIsOperatorGated() public {
+        HydropumpBuyback.SwapData[] memory swaps = new HydropumpBuyback.SwapData[](0);
+
+        vm.prank(stranger);
+        vm.expectRevert(HydropumpBuyback.NotOperator.selector);
+        buyback.buybackAndBribe(swaps);
     }
 
     function test_BribeRevertsWithNothingToSend() public {

@@ -1,49 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Test} from "forge-std/Test.sol";
-import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {Vm} from "forge-std/Vm.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {HydropumpLauncher} from "../contracts/HydropumpLauncher.sol";
-import {HydropumpAddresses} from "../contracts/libraries/HydropumpAddresses.sol";
+import {PairDirectory} from "../contracts/PairDirectory.sol";
+import {FeeUseRegistry} from "../contracts/FeeUseRegistry.sol";
+import {FeeUses} from "../contracts/libraries/FeeUses.sol";
+import {HydropumpFixture} from "./helpers/HydropumpFixture.sol";
 
-contract HydropumpLauncherTest is Test {
-    HydropumpLauncher internal launcher;
-
-    address internal owner = makeAddr("owner");
-    address internal admin = makeAddr("admin");
-    address internal locker = makeAddr("locker");
-    address internal creator = makeAddr("creator");
-    address internal stranger = makeAddr("stranger");
-
-    address internal constant WETH = HydropumpAddresses.WETH;
-    uint96 internal constant LAUNCH_FEE = 0.0005 ether;
-
-    function setUp() public {
-        vm.deal(creator, 1 ether);
-        vm.deal(stranger, 1 ether);
-        launcher = HydropumpLauncher(
-            address(
-                new ERC1967Proxy(
-                    address(new HydropumpLauncher()),
-                    abi.encodeCall(HydropumpLauncher.initialize, (owner, admin, locker, LAUNCH_FEE))
-                )
-            )
-        );
-        vm.prank(owner);
-        launcher.configureQuoteTokens(_one(WETH), _one(true), _oneTick(-228_200));
-    }
-
-    /// @dev What the frontend's Web Worker does: bump the salt until the token sorts below the quote.
-    function _mineSalt(address deployer) internal view returns (bytes32 salt, uint256 attempts) {
-        for (uint256 i = 0; i < 20_000; i++) {
-            salt = bytes32(i);
-            attempts = i + 1;
-            if (launcher.isSaltValid(deployer, salt, WETH)) return (salt, attempts);
-        }
-        revert("no salt found");
-    }
-
+/// @notice The launcher after the registry moved out: what it still owns, and what it now asks for.
+contract HydropumpLauncherTest is HydropumpFixture {
     // =============================
     //  CURVE
     // =============================
@@ -65,150 +33,214 @@ contract HydropumpLauncherTest is Test {
         assertEq(previousUpper, 887_200, "tail must reach the max usable tick");
     }
 
-    // =============================
-    //  SALT MINING / TOKEN0 INVARIANT
-    // =============================
-
-    function test_MinedSaltSortsBelowTheQuoteToken() public view {
-        (bytes32 salt, uint256 attempts) = _mineSalt(creator);
-
-        assertLt(uint160(launcher.predictToken(creator, salt)), uint160(WETH));
-        assertLt(attempts, 500, "mining against WETH should take a handful of attempts");
-    }
-
-    function test_SaltValidityIsPerQuoteToken() public view {
-        (bytes32 salt,) = _mineSalt(creator);
-        address predicted = launcher.predictToken(creator, salt);
-
-        assertTrue(launcher.isSaltValid(creator, salt, WETH));
-        // A quote token below the mined address invalidates the same salt.
-        assertFalse(launcher.isSaltValid(creator, salt, address(uint160(predicted) - 1)));
-    }
-
-    function test_LaunchRevertsOnUnminedSalt() public {
-        bytes32 salt;
-        for (uint256 i = 0; i < 20_000; i++) {
-            salt = bytes32(i);
-            if (!launcher.isSaltValid(creator, salt, WETH)) break;
+    /// Offsets are distances, not directions — the sign comes from the pair's ordering at mint time.
+    function test_CurveOffsetsAreUnsigned() public view {
+        for (uint256 i = 0; i < launcher.bandCount(); i++) {
+            (int24 lower, int24 upper,) = launcher.band(i);
+            assertGe(lower, 0, "band offsets must be distances from the start tick");
+            assertGt(upper, 0);
         }
+    }
+
+    // =============================
+    //  THE DIRECTORY
+    // =============================
+
+    /// The launcher no longer holds a quote registry; it asks the directory on every launch. Which means a
+    /// reprice takes effect immediately, with no write to the launcher at all.
+    function test_ARepriceInTheDirectoryMovesTheNextLaunch() public {
+        (, address firstPool,) = _launch(HIGH_QUOTE);
+        assertEq(_currentTick(firstPool), WETH_START_TICK);
+
+        address[] memory tokens = new address[](1);
+        int24[] memory ticks = new int24[](1);
+        (tokens[0], ticks[0]) = (HIGH_QUOTE, -230_000);
+        vm.prank(owner);
+        directory.setStartTicks(tokens, ticks);
+
+        (, address secondPool,) = _launch(HIGH_QUOTE);
+        assertEq(_currentTick(secondPool), -230_000, "no launcher write was needed");
+    }
+
+    function test_LaunchRevertsOnAQuoteTheDirectoryDoesNotList() public {
+        HydropumpLauncher.LaunchParams memory params = HydropumpLauncher.LaunchParams({
+            name: "Alpha",
+            symbol: "ALPHA",
+            quoteToken: makeAddr("unlisted"),
+            creatorRecipient: creator,
+            buyAmount: 0,
+            feeUse: bytes32(0)
+        });
 
         vm.prank(creator);
-        vm.expectRevert(HydropumpLauncher.TokenNotBelowQuote.selector);
-        launcher.launch{value: LAUNCH_FEE}(_params(salt));
-    }
-
-    function test_SaltIsBoundToTheSender() public {
-        (bytes32 salt,) = _mineSalt(creator);
-
-        // Same salt, different sender, different token address - so a mined salt cannot be lifted from
-        // the mempool and used by someone else.
-        assertTrue(launcher.predictToken(creator, salt) != launcher.predictToken(stranger, salt));
-
-        // Find a salt that works for the creator but not the stranger, and confirm the stranger is stopped.
-        bytes32 exclusive;
-        for (uint256 i = 0; i < 20_000; i++) {
-            exclusive = bytes32(i);
-            if (launcher.isSaltValid(creator, exclusive, WETH) && !launcher.isSaltValid(stranger, exclusive, WETH)) {
-                break;
-            }
-        }
-        vm.prank(stranger);
-        vm.expectRevert(HydropumpLauncher.TokenNotBelowQuote.selector);
-        launcher.launch{value: LAUNCH_FEE}(_params(exclusive));
-    }
-
-    // =============================
-    //  QUOTE REGISTRY
-    // =============================
-
-    function test_LaunchRevertsOnUnknownQuoteToken() public {
-        (bytes32 salt,) = _mineSalt(creator);
-        HydropumpLauncher.LaunchParams memory params = _params(salt);
-        params.quoteToken = makeAddr("randomToken");
-
-        vm.prank(creator);
-        vm.expectRevert(HydropumpLauncher.QuoteTokenNotEnabled.selector);
+        vm.expectRevert(PairDirectory.QuoteTokenNotEnabled.selector);
         launcher.launch{value: LAUNCH_FEE}(params);
     }
 
-    function test_ConfigureQuoteTokenIsOwnerOnly() public {
-        vm.prank(stranger);
-        vm.expectRevert();
-        launcher.configureQuoteTokens(_one(WETH), _one(true), _oneTick(-1000));
+    function test_ReadsPassThroughToTheDirectory() public {
+        assertTrue(launcher.isQuoteEnabled(HIGH_QUOTE));
+        assertFalse(launcher.isQuoteEnabled(makeAddr("unlisted")));
+        assertEq(launcher.poolStartTick(address(uint160(1)), HIGH_QUOTE), WETH_START_TICK);
+        assertEq(launcher.poolStartTick(address(type(uint160).max), HIGH_QUOTE), -WETH_START_TICK);
     }
 
-    function test_ConfigureQuoteTokensRejectsRaggedInput() public {
+    function test_OnlyAdminCanRepointTheDirectory() public {
         vm.prank(owner);
-        vm.expectRevert(HydropumpLauncher.LengthMismatch.selector);
-        launcher.configureQuoteTokens(_one(WETH), new bool[](2), _oneTick(-1000));
-    }
+        vm.expectRevert(HydropumpLauncher.NotAdmin.selector);
+        launcher.setPairDirectory(stranger);
 
-    function test_ConfigureQuoteTokensAppliesEveryEntry() public {
-        address usdc = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
-        address[] memory quotes = new address[](2);
-        bool[] memory enabled = new bool[](2);
-        int24[] memory ticks = new int24[](2);
-        (quotes[0], enabled[0], ticks[0]) = (WETH, false, -1);
-        (quotes[1], enabled[1], ticks[1]) = (usdc, true, -421_600);
-
-        vm.prank(owner);
-        launcher.configureQuoteTokens(quotes, enabled, ticks);
-
-        (bool wethEnabled, int24 wethTick,) = launcher.quoteTokens(WETH);
-        (bool usdcEnabled, int24 usdcTick,) = launcher.quoteTokens(usdc);
-        assertFalse(wethEnabled);
-        assertEq(wethTick, -1);
-        assertTrue(usdcEnabled);
-        assertEq(usdcTick, -421_600);
+        vm.prank(admin);
+        launcher.setPairDirectory(stranger);
+        assertEq(launcher.pairDirectory(), stranger);
     }
 
     // =============================
-    //  START TICK
+    //  FEE USE
     // =============================
 
-    function test_OwnerRefreshesStartTick() public {
-        vm.prank(owner);
-        launcher.setStartTicks(_one(WETH), _oneTick(-230_000));
+    /// A creator picks what their fees are spent on at launch, and the escrow records it.
+    function test_CreatorPicksAFeeUseAtLaunch() public {
+        (address token,,) = _launch(HIGH_QUOTE, FeeUses.AUTO_LP, 0);
 
-        (, int24 startTick, uint64 updatedAt) = launcher.quoteTokens(WETH);
-        assertEq(startTick, -230_000);
-        assertEq(updatedAt, block.timestamp);
+        assertEq(registry.feeUseOf(token), FeeUses.AUTO_LP);
+        assertEq(registry.implementationFor(token), address(autoLp));
+        assertTrue(registry.hasExplicitFeeUse(token));
     }
 
-    function test_BatchRefreshUpdatesEveryQuote() public {
-        address usdc = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
-        vm.prank(owner);
-        launcher.configureQuoteTokens(_one(usdc), _one(true), _oneTick(-421_600));
+    /// Leaving it blank is a valid choice, not an error — the launch rides whatever the default is.
+    function test_NoChoiceLeavesALaunchOnTheDefault() public {
+        (address token,,) = _launch(HIGH_QUOTE, bytes32(0), 0);
 
-        address[] memory quotes = new address[](2);
-        int24[] memory ticks = new int24[](2);
-        (quotes[0], ticks[0]) = (WETH, -228_400);
-        (quotes[1], ticks[1]) = (usdc, -421_800);
-
-        vm.prank(owner);
-        launcher.setStartTicks(quotes, ticks);
-
-        (, int24 wethTick,) = launcher.quoteTokens(WETH);
-        (, int24 usdcTick,) = launcher.quoteTokens(usdc);
-        assertEq(wethTick, -228_400);
-        assertEq(usdcTick, -421_800);
+        assertEq(registry.feeUseOf(token), FeeUses.CREATOR_BALANCE);
+        assertEq(registry.implementationFor(token), address(creatorBalance));
+        assertFalse(registry.hasExplicitFeeUse(token), "it is riding the default, not pinned to it");
     }
 
-    function test_StrangerCannotRefreshStartTick() public {
-        vm.prank(stranger);
-        vm.expectRevert();
-        launcher.setStartTicks(_one(WETH), _oneTick(-1));
+    function test_AnUnregisteredFeeUseIsRejectedRatherThanIgnored() public {
+        HydropumpLauncher.LaunchParams memory params = HydropumpLauncher.LaunchParams({
+            name: "Alpha",
+            symbol: "ALPHA",
+            quoteToken: HIGH_QUOTE,
+            creatorRecipient: creator,
+            buyAmount: 0,
+            feeUse: keccak256("not.a.registered.fee.use")
+        });
+
+        vm.prank(creator);
+        vm.expectRevert(FeeUseRegistry.UnknownFeeUse.selector);
+        launcher.launch{value: LAUNCH_FEE}(params);
     }
 
-    function test_StartTickOnDisabledQuoteReverts() public {
+    /// A launcher with no escrow still launches. It just leaves every launch on whatever default the escrow
+    /// is later given, rather than refusing to open a pool over a fee routing detail.
+    function test_LaunchingStillWorksWithNoEscrowSet() public {
+        vm.prank(admin);
+        launcher.setFeeUseRegistry(address(0));
+
+        (address token,,) = _launch(HIGH_QUOTE, FeeUses.AUTO_LP, 0);
+        assertTrue(token != address(0));
+    }
+
+    function test_OnlyAdminCanRepointTheEscrow() public {
         vm.prank(owner);
-        vm.expectRevert(HydropumpLauncher.QuoteTokenNotEnabled.selector);
-        launcher.setStartTicks(_one(makeAddr("other")), _oneTick(-1));
+        vm.expectRevert(HydropumpLauncher.NotAdmin.selector);
+        launcher.setFeeUseRegistry(stranger);
+
+        vm.prank(admin);
+        launcher.setFeeUseRegistry(stranger);
+        assertEq(launcher.feeUseRegistry(), stranger);
     }
 
     // =============================
-    //  ADMIN
+    //  TOKEN ADDRESS
     // =============================
+
+    /// Nothing about a launch is chosen by its address any more. It comes out of `CREATE`, it is not
+    /// predictable, and both orientations of the pair it lands in are launchable — which is the whole
+    /// reason the curve mirrors.
+    function test_AnAddressIsNeverRejectedForWhereItSorts() public {
+        (address asToken0,,) = _launch(HIGH_QUOTE);
+        (address asToken1,,) = _launch(LOW_QUOTE);
+
+        assertTrue(asToken0 < HIGH_QUOTE, "landed on the token0 side of one");
+        assertTrue(asToken1 > LOW_QUOTE, "and the token1 side of the other");
+    }
+
+    /// The contract the frontend actually depends on: the address is only knowable after the fact, and
+    /// `Launched` is where it is announced. If the event and the return value could disagree, a launch
+    /// would write its metadata against a token that does not exist.
+    function test_TheLaunchedEventCarriesTheAddressThatWasDeployed() public {
+        vm.recordLogs();
+        (address token, address pool,) = _launch(HIGH_QUOTE);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 signature =
+            keccak256("Launched(address,address,address,address,int24,uint256[],string,string,bytes32,uint64)");
+
+        bool found;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] != signature) continue;
+            found = true;
+            assertEq(address(uint160(uint256(logs[i].topics[1]))), token, "event token must be the real one");
+            assertEq(address(uint160(uint256(logs[i].topics[2]))), creator, "and the creator");
+        }
+        assertTrue(found, "a launch must announce itself");
+        assertTrue(pool != address(0));
+        assertGt(token.code.length, 0, "and the address it names must hold the token");
+    }
+
+    /// Every launch is a fresh `CREATE` from the launcher, so two in a row cannot collide however similar
+    /// their parameters are.
+    function test_TwoIdenticalLaunchesGetDifferentAddresses() public {
+        (address first,,) = _launch(HIGH_QUOTE);
+        (address second,,) = _launch(HIGH_QUOTE);
+
+        assertTrue(first != second);
+        assertEq(IERC20(first).totalSupply(), launcher.SUPPLY());
+        assertEq(IERC20(second).totalSupply(), launcher.SUPPLY());
+    }
+
+    // =============================
+    //  FEES + ADMIN
+    // =============================
+
+    function test_LaunchFeeIsAMinimumAndSurplusIsKept() public {
+        _launch(HIGH_QUOTE);
+        assertEq(address(launcher).balance, LAUNCH_FEE);
+
+        vm.prank(creator);
+        launcher.launch{value: LAUNCH_FEE + 1 ether}(
+            HydropumpLauncher.LaunchParams({
+                name: "Beta",
+                symbol: "BETA",
+                quoteToken: HIGH_QUOTE,
+                creatorRecipient: creator,
+                buyAmount: 0,
+                feeUse: bytes32(0)
+            })
+        );
+        assertEq(address(launcher).balance, LAUNCH_FEE * 2 + 1 ether, "surplus is kept, not refunded");
+
+        address sink = makeAddr("sink");
+        vm.prank(admin);
+        assertEq(launcher.claimLaunchFees(sink), LAUNCH_FEE * 2 + 1 ether);
+        assertEq(sink.balance, LAUNCH_FEE * 2 + 1 ether);
+    }
+
+    function test_LaunchRevertsBelowTheFee() public {
+        vm.prank(creator);
+        vm.expectRevert(HydropumpLauncher.InsufficientLaunchFee.selector);
+        launcher.launch{value: LAUNCH_FEE - 1}(
+            HydropumpLauncher.LaunchParams({
+                name: "Alpha",
+                symbol: "ALPHA",
+                quoteToken: HIGH_QUOTE,
+                creatorRecipient: creator,
+                buyAmount: 0,
+                feeUse: bytes32(0)
+            })
+        );
+    }
 
     function test_OnlyAdminCanUpgrade() public {
         address newImpl = address(new HydropumpLauncher());
@@ -218,78 +250,30 @@ contract HydropumpLauncherTest is Test {
         vm.expectRevert(HydropumpLauncher.NotAdmin.selector);
         launcher.upgradeToAndCall(newImpl, "");
 
-        vm.prank(stranger);
-        vm.expectRevert(HydropumpLauncher.NotAdmin.selector);
-        launcher.upgradeToAndCall(newImpl, "");
-
         vm.prank(admin);
         launcher.upgradeToAndCall(newImpl, "");
     }
 
-    function test_OnlyAdminCanReassignAdmin() public {
-        vm.prank(owner);
+    function test_OnlyAdminCanRepointTheLockerOrReassignAdmin() public {
+        vm.startPrank(owner);
+        vm.expectRevert(HydropumpLauncher.NotAdmin.selector);
+        launcher.setLocker(stranger);
         vm.expectRevert(HydropumpLauncher.NotAdmin.selector);
         launcher.setAdmin(owner);
-
-        vm.prank(admin);
-        launcher.setAdmin(stranger);
-        assertEq(launcher.admin(), stranger);
-    }
-
-    function test_OwnerRunsConfiguration() public {
-        vm.startPrank(owner);
-        launcher.configureQuoteTokens(_one(WETH), _one(true), _oneTick(-228_000));
-        launcher.setStartTicks(_one(WETH), _oneTick(-228_400));
         vm.stopPrank();
 
-        (, int24 tick,) = launcher.quoteTokens(WETH);
-        assertEq(tick, -228_400);
-    }
-
-    /// Repointing the locker redirects every future launch's liquidity, so the hot key must not hold it.
-    function test_OnlyAdminCanRepointTheLocker() public {
-        vm.prank(owner);
-        vm.expectRevert(HydropumpLauncher.NotAdmin.selector);
+        vm.startPrank(admin);
         launcher.setLocker(stranger);
+        launcher.setAdmin(stranger);
+        vm.stopPrank();
 
-        vm.prank(stranger);
-        vm.expectRevert(HydropumpLauncher.NotAdmin.selector);
-        launcher.setLocker(stranger);
-
-        vm.prank(admin);
-        launcher.setLocker(stranger);
         assertEq(launcher.locker(), stranger);
+        assertEq(launcher.admin(), stranger);
     }
 
     function test_ImplementationCannotBeInitialized() public {
         HydropumpLauncher impl = new HydropumpLauncher();
         vm.expectRevert();
-        impl.initialize(owner, admin, locker, LAUNCH_FEE);
-    }
-
-    function _params(bytes32 salt) internal view returns (HydropumpLauncher.LaunchParams memory) {
-        return HydropumpLauncher.LaunchParams({
-            name: "Alpha", symbol: "ALPHA", quoteToken: WETH, userSalt: salt, creatorRecipient: creator, buyAmount: 0
-        });
-    }
-
-    function _one(address a) internal pure returns (address[] memory out) {
-        out = new address[](1);
-        out[0] = a;
-    }
-
-    function _one(bool b) internal pure returns (bool[] memory out) {
-        out = new bool[](1);
-        out[0] = b;
-    }
-
-    function _one(uint256 v) internal pure returns (uint256[] memory out) {
-        out = new uint256[](1);
-        out[0] = v;
-    }
-
-    function _oneTick(int24 t) internal pure returns (int24[] memory out) {
-        out = new int24[](1);
-        out[0] = t;
+        impl.initialize(owner, admin, address(locker), address(directory), LAUNCH_FEE);
     }
 }

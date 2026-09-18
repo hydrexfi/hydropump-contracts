@@ -14,7 +14,10 @@ library HydropumpAddresses {
     address internal constant SWAP_ROUTER = 0x6f4bE24d7dC93b6ffcBAb3Fd0747c5817Cea3F9e;
 
     /// @notice Hydrex multi router, used for the multi-hop buyback routes
-    address internal constant MULTI_ROUTER = 0x599bFa1039C9e22603F15642B711D56BE62071f4;
+    /// @notice KyberSwap's MetaAggregationRouterV2 on Base — what the aggregator's own routes are built
+    ///         to be called on. Not Hydrex's MultiRouter proxy, which takes its own ABI rather than raw
+    ///         aggregator calldata.
+    address internal constant KYBER_ROUTER = 0x6131B5fae19EA4f9D964eAc0408E4408b66337b5;
 
     /// @notice Hydrex classic (solidly) pair factory, used for the gauge-carrying pair
     address internal constant PAIR_FACTORY = 0xC47F17c4fd96F50eFD2A2448ceDe5C185c084bf0;

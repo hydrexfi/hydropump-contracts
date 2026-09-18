@@ -16,6 +16,15 @@ interface INonfungiblePositionManager {
         uint256 deadline;
     }
 
+    struct IncreaseLiquidityParams {
+        uint256 tokenId;
+        uint256 amount0Desired;
+        uint256 amount1Desired;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        uint256 deadline;
+    }
+
     struct CollectParams {
         uint256 tokenId;
         address recipient;
@@ -29,6 +38,13 @@ interface INonfungiblePositionManager {
         returns (uint256 tokenId, uint128 liquidity, uint256 amount0, uint256 amount1);
 
     function collect(CollectParams calldata params) external payable returns (uint256 amount0, uint256 amount1);
+
+    /// @dev Not owner-gated on Algebra: anyone may add to anyone's position. That is what lets fees be
+    ///      pushed back into a band the locker holds without the locker ever parting with it.
+    function increaseLiquidity(IncreaseLiquidityParams calldata params)
+        external
+        payable
+        returns (uint128 liquidity, uint256 amount0, uint256 amount1);
 
     function createAndInitializePoolIfNecessary(
         address token0,

@@ -10,4 +10,14 @@ interface IHydropumpLocker {
         address creatorRecipient,
         uint256[] calldata positionIds
     ) external;
+
+    /// @notice Where a launch's creator share is paid. The single source of truth — fee uses read it
+    ///         rather than keeping their own copy, so redirecting it moves every strategy at once.
+    function creatorRecipient(address token) external view returns (address);
+
+    function quoteTokenOf(address token) external view returns (address);
+
+    function poolOf(address token) external view returns (address);
+
+    function getPositions(address token) external view returns (uint256[] memory);
 }
