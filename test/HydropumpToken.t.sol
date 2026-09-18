@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
-import {HydropumpToken} from "../contracts/HydropumpToken.sol";
+import {HydropumpToken} from "../contracts/core/HydropumpToken.sol";
 
 /// @dev Stands in for the launcher. The whole supply is minted to whoever deploys, so a test that wants
 ///      the balance somewhere else forwards it on — which is what the launcher does too.

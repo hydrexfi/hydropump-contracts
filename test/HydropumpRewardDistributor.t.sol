@@ -4,7 +4,7 @@ pragma solidity 0.8.26;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {HydropumpRewardDistributor} from "../contracts/HydropumpRewardDistributor.sol";
+import {HydropumpRewardDistributor} from "../contracts/core/HydropumpRewardDistributor.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 /// @notice The reward ledger: who may write it, who gets paid, and what an owner may take back.

@@ -4,8 +4,8 @@ pragma solidity 0.8.26;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {AutoLpFeeUse} from "../contracts/feeuses/AutoLpFeeUse.sol";
-import {FeeUseRegistry} from "../contracts/FeeUseRegistry.sol";
-import {HydropumpLocker} from "../contracts/HydropumpLocker.sol";
+import {FeeUseRegistry} from "../contracts/helpers/FeeUseRegistry.sol";
+import {HydropumpLocker} from "../contracts/core/HydropumpLocker.sol";
 import {IFeeUse} from "../contracts/interfaces/IFeeUse.sol";
 import {FeeUses} from "../contracts/libraries/FeeUses.sol";
 import {HydropumpFixture} from "./helpers/HydropumpFixture.sol";

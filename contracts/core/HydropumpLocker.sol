@@ -8,12 +8,12 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 
-import {IHydropumpLocker} from "./interfaces/IHydropumpLocker.sol";
-import {IFeeUseRegistry} from "./interfaces/IFeeUseRegistry.sol";
-import {IFeeUse} from "./interfaces/IFeeUse.sol";
-import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionManager.sol";
-import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
-import {HydropumpAddresses} from "./libraries/HydropumpAddresses.sol";
+import {IHydropumpLocker} from "../interfaces/IHydropumpLocker.sol";
+import {IFeeUseRegistry} from "../interfaces/IFeeUseRegistry.sol";
+import {IFeeUse} from "../interfaces/IFeeUse.sol";
+import {INonfungiblePositionManager} from "../interfaces/INonfungiblePositionManager.sol";
+import {ISwapRouter} from "../interfaces/ISwapRouter.sol";
+import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
 
 /// @title HydropumpLocker
 /// @notice Holds every launch's positions permanently and splits the fees they earn.

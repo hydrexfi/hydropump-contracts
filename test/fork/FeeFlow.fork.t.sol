@@ -4,7 +4,7 @@ pragma solidity 0.8.26;
 import {console2} from "forge-std/console2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
+import {HydropumpLocker} from "../../contracts/core/HydropumpLocker.sol";
 import {FeeUses} from "../../contracts/libraries/FeeUses.sol";
 import {IAlgebraPool} from "../../contracts/interfaces/IAlgebraPool.sol";
 import {ForkFixture} from "./helpers/ForkFixture.sol";

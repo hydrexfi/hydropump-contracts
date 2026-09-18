@@ -4,7 +4,7 @@ pragma solidity 0.8.26;
 import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 
-import {HydropumpLauncher} from "../../contracts/HydropumpLauncher.sol";
+import {HydropumpLauncher} from "../../contracts/core/HydropumpLauncher.sol";
 
 /// @title UpgradeLauncher
 /// @notice Deploys a launcher implementation and points the proxy at it.

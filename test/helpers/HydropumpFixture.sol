@@ -5,10 +5,10 @@ import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {HydropumpLauncher} from "../../contracts/HydropumpLauncher.sol";
-import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
-import {PairDirectory} from "../../contracts/PairDirectory.sol";
-import {FeeUseRegistry} from "../../contracts/FeeUseRegistry.sol";
+import {HydropumpLauncher} from "../../contracts/core/HydropumpLauncher.sol";
+import {HydropumpLocker} from "../../contracts/core/HydropumpLocker.sol";
+import {PairDirectory} from "../../contracts/helpers/PairDirectory.sol";
+import {FeeUseRegistry} from "../../contracts/helpers/FeeUseRegistry.sol";
 import {CreatorBalanceFeeUse} from "../../contracts/feeuses/CreatorBalanceFeeUse.sol";
 import {AutoLpFeeUse} from "../../contracts/feeuses/AutoLpFeeUse.sol";
 import {BuybackBurnFeeUse} from "../../contracts/feeuses/BuybackBurnFeeUse.sol";

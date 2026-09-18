@@ -9,6 +9,14 @@ bribes the Hydropump gauge with it.
 
 ## Contracts
 
+```
+contracts/
+  core/       Launcher, Locker, Token, Buyback, RewardDistributor
+  helpers/    PairDirectory, FeeUseRegistry, GaugeToken
+  feeuses/    the three things a creator's share can become
+  interfaces/ libraries/
+```
+
 | Contract               | Upgradeable |                                                                                     |
 | ---------------------- | ----------- | ----------------------------------------------------------------------------------- |
 | `PairDirectory`        | UUPS        | What is launchable, and what one launch token is worth in each quote. Repriced daily |
@@ -21,6 +29,7 @@ bribes the Hydropump gauge with it.
 | `BuybackBurnFeeUse`    | no          | Creator share buys the token in its own pool and burns it                            |
 | `HydropumpBuyback`     | no          | Quote → HYDX via KyberSwap, then bribes the Hydropump gauge                          |
 | `HydropumpGaugeToken`  | no          | Placeholder ERC20 for the pair the Hydropump gauge hangs off                         |
+| `HydropumpRewardDistributor` | no    | Operator credits rewards, recipients withdraw. Owner can rewrite and withdraw        |
 
 ```
         PairDirectory ──whitelists pairs, daily quote rates──▶ HydropumpLauncher

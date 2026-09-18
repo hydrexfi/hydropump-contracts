@@ -4,7 +4,7 @@ pragma solidity 0.8.26;
 import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 
-import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
+import {HydropumpLocker} from "../../contracts/core/HydropumpLocker.sol";
 
 /// @title UpgradeLocker
 /// @notice Points the locker proxy at a fresh implementation.

@@ -4,9 +4,9 @@ pragma solidity 0.8.26;
 import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {HydropumpLauncher} from "../contracts/HydropumpLauncher.sol";
-import {PairDirectory} from "../contracts/PairDirectory.sol";
-import {FeeUseRegistry} from "../contracts/FeeUseRegistry.sol";
+import {HydropumpLauncher} from "../contracts/core/HydropumpLauncher.sol";
+import {PairDirectory} from "../contracts/helpers/PairDirectory.sol";
+import {FeeUseRegistry} from "../contracts/helpers/FeeUseRegistry.sol";
 import {FeeUses} from "../contracts/libraries/FeeUses.sol";
 import {HydropumpFixture} from "./helpers/HydropumpFixture.sol";
 

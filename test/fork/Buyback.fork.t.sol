@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {HydropumpBuyback} from "../../contracts/HydropumpBuyback.sol";
+import {HydropumpBuyback} from "../../contracts/core/HydropumpBuyback.sol";
 import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.sol";
 
 interface IBribeView {

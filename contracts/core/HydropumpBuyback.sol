@@ -5,8 +5,8 @@ import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import {IBribe} from "./interfaces/IBribe.sol";
-import {HydropumpAddresses} from "./libraries/HydropumpAddresses.sol";
+import {IBribe} from "../interfaces/IBribe.sol";
+import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
 
 /// @title HydropumpBuyback
 /// @notice Receives the protocol's share of launch fees from the locker, buys HYDX with it, and bribes
@@ -16,10 +16,6 @@ contract HydropumpBuyback is Ownable2Step {
 
     IERC20 public immutable HYDX;
 
-    /// @notice Where `routerCalldata` is sent. KyberSwap's aggregator by default.
-    /// @dev Settable rather than constant because KyberSwap versions its router, and a swap leg that
-    ///      cannot follow it would strand the protocol's fees. Owner-only: the operator supplies the
-    ///      calldata, so letting them also choose the target would make this an arbitrary-call contract.
     address public router = HydropumpAddresses.KYBER_ROUTER;
 
     struct SwapData {
@@ -29,10 +25,7 @@ contract HydropumpBuyback is Ownable2Step {
         uint256 minHydxOut;
     }
 
-    /// @notice Runs the buyback job. One address — the same key that deploys and runs the other jobs.
     address public operator;
-
-    /// @notice Bribe contract of the Hydropump gauge, where bought-back HYDX is deposited for voters
     address public gaugeBribe;
 
     event Swapped(address indexed inputToken, uint256 amountIn, uint256 hydxOut);
@@ -74,12 +67,6 @@ contract HydropumpBuyback is Ownable2Step {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Convert held balances into HYDX along off-chain routes.
-    /// @dev Operator-gated: `routerCalldata` is arbitrary and `minHydxOut` is the only slippage bound, so an
-    ///      open caller could pass a zero bound and sandwich the trade.
-    ///
-    ///      Build each route with this contract as both sender and recipient — the output is measured as
-    ///      the change in this contract's own HYDX balance, so a route that pays out anywhere else
-    ///      reads as zero and trips the bound.
     function buyback(SwapData[] calldata swaps) external onlyOperator returns (uint256 totalHydxOut) {
         for (uint256 i = 0; i < swaps.length; i++) {
             totalHydxOut += _swap(swaps[i]);
@@ -87,12 +74,6 @@ contract HydropumpBuyback is Ownable2Step {
     }
 
     /// @notice The daily job: sell everything along the given routes and bribe the proceeds in one call.
-    /// @dev Nothing forces these apart — `bribe` reads this contract's balance, and the swaps have already
-    ///      credited it by the time it runs. Kept callable separately too: `bribe` alone sends HYDX that is
-    ///      already here, and `buyback` alone is useful when the gauge is mid-migration.
-    ///
-    ///      Reverts as a whole if either half fails, so a bribe that cannot land leaves the HYDX unsold
-    ///      rather than sitting here waiting for someone to notice.
     function buybackAndBribe(SwapData[] calldata swaps)
         external
         onlyOperator
@@ -105,7 +86,6 @@ contract HydropumpBuyback is Ownable2Step {
     }
 
     /// @notice Deposit the full HYDX balance into the Hydropump gauge's bribe contract.
-    /// @dev Permissionless: the destination is fixed, so the HYDX cannot be stranded by one operator.
     function bribe() external returns (uint256 amount) {
         return _bribe();
     }

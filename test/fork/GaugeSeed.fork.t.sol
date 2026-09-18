@@ -6,7 +6,7 @@ import {console2} from "forge-std/console2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {DeployGaugeSeed} from "../../script/deploy/DeployGaugeSeed.s.sol";
-import {HydropumpGaugeToken} from "../../contracts/HydropumpGaugeToken.sol";
+import {HydropumpGaugeToken} from "../../contracts/helpers/HydropumpGaugeToken.sol";
 import {IPair} from "../../contracts/interfaces/IPair.sol";
 import {IPairFactory} from "../../contracts/interfaces/IPairFactory.sol";
 import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.sol";

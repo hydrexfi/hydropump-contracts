@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
-import {HydropumpBuyback} from "../contracts/HydropumpBuyback.sol";
+import {HydropumpBuyback} from "../contracts/core/HydropumpBuyback.sol";
 import {HydropumpAddresses} from "../contracts/libraries/HydropumpAddresses.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockRouter} from "./mocks/MockRouter.sol";

@@ -4,7 +4,7 @@ pragma solidity 0.8.26;
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {PairDirectory} from "../contracts/PairDirectory.sol";
+import {PairDirectory} from "../contracts/helpers/PairDirectory.sol";
 import {IPairDirectory} from "../contracts/interfaces/IPairDirectory.sol";
 import {TickMath} from "../contracts/libraries/TickMath.sol";
 import {HydropumpAddresses} from "../contracts/libraries/HydropumpAddresses.sol";

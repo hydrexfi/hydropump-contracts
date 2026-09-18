@@ -5,8 +5,8 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-import {IPairDirectory} from "./interfaces/IPairDirectory.sol";
-import {TickMath} from "./libraries/TickMath.sol";
+import {IPairDirectory} from "../interfaces/IPairDirectory.sol";
+import {TickMath} from "../libraries/TickMath.sol";
 
 /// @title PairDirectory
 /// @notice Which tokens a launch may be quoted in, and what one launch token is worth in each of them.

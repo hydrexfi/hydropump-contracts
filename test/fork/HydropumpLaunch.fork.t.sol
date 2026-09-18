@@ -5,8 +5,8 @@ import {console2} from "forge-std/console2.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import {HydropumpLauncher} from "../../contracts/HydropumpLauncher.sol";
-import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
+import {HydropumpLauncher} from "../../contracts/core/HydropumpLauncher.sol";
+import {HydropumpLocker} from "../../contracts/core/HydropumpLocker.sol";
 import {IAlgebraPool} from "../../contracts/interfaces/IAlgebraPool.sol";
 import {FeeUses} from "../../contracts/libraries/FeeUses.sol";
 import {ForkFixture} from "./helpers/ForkFixture.sol";

@@ -5,11 +5,11 @@ import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {HydropumpLauncher} from "../../contracts/HydropumpLauncher.sol";
-import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
-import {HydropumpBuyback} from "../../contracts/HydropumpBuyback.sol";
-import {PairDirectory} from "../../contracts/PairDirectory.sol";
-import {FeeUseRegistry} from "../../contracts/FeeUseRegistry.sol";
+import {HydropumpLauncher} from "../../contracts/core/HydropumpLauncher.sol";
+import {HydropumpLocker} from "../../contracts/core/HydropumpLocker.sol";
+import {HydropumpBuyback} from "../../contracts/core/HydropumpBuyback.sol";
+import {PairDirectory} from "../../contracts/helpers/PairDirectory.sol";
+import {FeeUseRegistry} from "../../contracts/helpers/FeeUseRegistry.sol";
 import {CreatorBalanceFeeUse} from "../../contracts/feeuses/CreatorBalanceFeeUse.sol";
 import {AutoLpFeeUse} from "../../contracts/feeuses/AutoLpFeeUse.sol";
 import {BuybackBurnFeeUse} from "../../contracts/feeuses/BuybackBurnFeeUse.sol";

@@ -5,7 +5,7 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-import {IFeeUseRegistry} from "./interfaces/IFeeUseRegistry.sol";
+import {IFeeUseRegistry} from "../interfaces/IFeeUseRegistry.sol";
 
 /// @title FeeUseRegistry
 /// @notice Which fee use each launch's creator share is spent on.

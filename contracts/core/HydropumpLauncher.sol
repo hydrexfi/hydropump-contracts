@@ -8,14 +8,14 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {HydropumpToken} from "./HydropumpToken.sol";
-import {IHydropumpLocker} from "./interfaces/IHydropumpLocker.sol";
-import {IPairDirectory} from "./interfaces/IPairDirectory.sol";
-import {IFeeUseRegistry} from "./interfaces/IFeeUseRegistry.sol";
-import {INonfungiblePositionManager} from "./interfaces/INonfungiblePositionManager.sol";
-import {IAlgebraPool} from "./interfaces/IAlgebraPool.sol";
-import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
-import {HydropumpAddresses} from "./libraries/HydropumpAddresses.sol";
-import {TickMath} from "./libraries/TickMath.sol";
+import {IHydropumpLocker} from "../interfaces/IHydropumpLocker.sol";
+import {IPairDirectory} from "../interfaces/IPairDirectory.sol";
+import {IFeeUseRegistry} from "../interfaces/IFeeUseRegistry.sol";
+import {INonfungiblePositionManager} from "../interfaces/INonfungiblePositionManager.sol";
+import {IAlgebraPool} from "../interfaces/IAlgebraPool.sol";
+import {ISwapRouter} from "../interfaces/ISwapRouter.sol";
+import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
+import {TickMath} from "../libraries/TickMath.sol";
 
 /// @title HydropumpLauncher
 /// @notice Clones an ERC20, opens its pool against a whitelisted quote token, seeds single-sided liquidity
@@ -122,8 +122,6 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     }
 
     /// @notice The tick the pool for this pair will actually open at.
-    /// @dev Delegated to the directory, which is where a quote's price lives. Kept here so a frontend that
-    ///      already holds the launcher address does not need a second one to preview a launch.
     function poolStartTick(address token, address quoteToken) public view returns (int24) {
         return IPairDirectory(pairDirectory).requirePoolStartTick(token, quoteToken);
     }
@@ -138,16 +136,25 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     }
 
     /// @notice Band `i` as unsigned tick distances from the start tick, plus its share of supply in bps.
+    /// @dev The four priced bands hold 0.6074 of what they used to, which scales the quote needed to
+    ///      reach any price by the same factor — cost is the integral of the curve below it, and that is
+    ///      linear in the tokens each band holds. A launch reaches $1m of valuation on about $70k of net
+    ///      buying rather than $115k, having sold a third of its supply rather than half.
+    ///
+    ///      What those bands give up goes to the tail, which is why the tail now starts at 150k rather
+    ///      than 92k: parked against the old boundary it made everything past ~$50m roughly twenty times
+    ///      harder, a wall rather than a book. Spread to 150k it is about 1.5x, and pushing the boundary
+    ///      further buys almost nothing.
     /// @dev Offsets, never absolute ticks: a tick encodes a raw wei ratio and shifts with the quote token's
     ///      decimals and price. Unsigned, never signed: the direction they run in is not a property of the
     ///      curve but of which side of the pair the launch token landed on, and `_mintBands` applies it.
     ///      Band 0 is always the one adjacent to the start price. Shares sum to 10000.
     function band(uint256 i) public pure returns (int24 offsetLower, int24 offsetUpper, uint256 shareBps) {
-        if (i == 0) return (0, 14_000, 900);
-        if (i == 1) return (14_000, 36_000, 2_200);
-        if (i == 2) return (36_000, 62_000, 3_000);
-        if (i == 3) return (62_000, 92_000, 3_700);
-        return (92_000, 887_200, 200);
+        if (i == 0) return (0, 14_000, 547);
+        if (i == 1) return (14_000, 36_000, 1_336);
+        if (i == 2) return (36_000, 62_000, 1_822);
+        if (i == 3) return (62_000, 150_000, 2_247);
+        return (150_000, 887_200, 4_048);
     }
 
     /*//////////////////////////////////////////////////////////////

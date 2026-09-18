@@ -6,8 +6,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import {HydropumpLauncher} from "../contracts/HydropumpLauncher.sol";
-import {HydropumpLocker} from "../contracts/HydropumpLocker.sol";
+import {HydropumpLauncher} from "../contracts/core/HydropumpLauncher.sol";
+import {HydropumpLocker} from "../contracts/core/HydropumpLocker.sol";
 import {TickMath} from "../contracts/libraries/TickMath.sol";
 import {HydropumpFixture} from "./helpers/HydropumpFixture.sol";
 import {MockAlgebra, MockAlgebraPool} from "./mocks/MockAlgebra.sol";

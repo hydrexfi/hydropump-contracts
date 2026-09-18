@@ -7,8 +7,8 @@ import {CreatorBalanceFeeUse} from "../contracts/feeuses/CreatorBalanceFeeUse.so
 import {AutoLpFeeUse} from "../contracts/feeuses/AutoLpFeeUse.sol";
 import {BuybackBurnFeeUse} from "../contracts/feeuses/BuybackBurnFeeUse.sol";
 import {FeeUses} from "../contracts/libraries/FeeUses.sol";
-import {FeeUseRegistry} from "../contracts/FeeUseRegistry.sol";
-import {HydropumpLocker} from "../contracts/HydropumpLocker.sol";
+import {FeeUseRegistry} from "../contracts/helpers/FeeUseRegistry.sol";
+import {HydropumpLocker} from "../contracts/core/HydropumpLocker.sol";
 import {HydropumpFixture} from "./helpers/HydropumpFixture.sol";
 import {MockAlgebraPool} from "./mocks/MockAlgebra.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";

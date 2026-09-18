@@ -50,11 +50,11 @@ contract HydropumpRewardDistributor is Ownable2Step {
     /// @notice Credit recipients and pull the total from the caller in the same transaction.
     /// @dev Funding and crediting together, so the ledger can never promise more than the contract holds.
     ///      Amounts add to whatever a recipient already has, so a weekly run is just another call.
-    function allocate(
-        address token,
-        address[] calldata recipients,
-        uint256[] calldata amounts
-    ) external onlyOperator returns (uint256 total) {
+    function allocate(address token, address[] calldata recipients, uint256[] calldata amounts)
+        external
+        onlyOperator
+        returns (uint256 total)
+    {
         if (token == address(0)) revert ZeroAddress();
         if (recipients.length != amounts.length) revert LengthMismatch();
 
@@ -109,11 +109,10 @@ contract HydropumpRewardDistributor is Ownable2Step {
     }
 
     /// @notice Overwrite what recipients are owed, to whatever the owner says — including nothing.
-    function setAllocation(
-        address token,
-        address[] calldata recipients,
-        uint256[] calldata amounts
-    ) external onlyOwner {
+    function setAllocation(address token, address[] calldata recipients, uint256[] calldata amounts)
+        external
+        onlyOwner
+    {
         if (token == address(0)) revert ZeroAddress();
         if (recipients.length != amounts.length) revert LengthMismatch();
 

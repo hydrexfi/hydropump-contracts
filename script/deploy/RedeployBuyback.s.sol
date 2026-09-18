@@ -4,8 +4,8 @@ pragma solidity 0.8.26;
 import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 
-import {HydropumpBuyback} from "../../contracts/HydropumpBuyback.sol";
-import {HydropumpLocker} from "../../contracts/HydropumpLocker.sol";
+import {HydropumpBuyback} from "../../contracts/core/HydropumpBuyback.sol";
+import {HydropumpLocker} from "../../contracts/core/HydropumpLocker.sol";
 import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.sol";
 
 /// @title RedeployBuyback

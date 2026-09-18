@@ -4,7 +4,7 @@ pragma solidity 0.8.26;
 import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 
-import {FeeUseRegistry} from "../../contracts/FeeUseRegistry.sol";
+import {FeeUseRegistry} from "../../contracts/helpers/FeeUseRegistry.sol";
 import {AutoLpFeeUse} from "../../contracts/feeuses/AutoLpFeeUse.sol";
 import {FeeUses} from "../../contracts/libraries/FeeUses.sol";
 
