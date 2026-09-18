@@ -2,7 +2,6 @@
 pragma solidity 0.8.26;
 
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -28,7 +27,7 @@ interface IHydropumpCompounder {
 
 /// @title HydropumpAutoLP
 /// @notice Per-launch strategy that compounds its escrow allocation into the currently active locked band.
-contract HydropumpAutoLP is Initializable, OwnableUpgradeable {
+contract HydropumpAutoLP is Initializable {
     using SafeERC20 for IERC20;
 
     INonfungiblePositionManager public constant nonfungiblePositionManager =
@@ -40,14 +39,12 @@ contract HydropumpAutoLP is Initializable, OwnableUpgradeable {
     IHydropumpCompounder public locker;
     HydropumpFeeEscrow public feeEscrow;
     bytes32 public escrowAccount;
-    address public operator;
     bool private _executing;
 
     event Compounded(uint256 indexed positionId, uint256 amount0, uint256 amount1, uint128 liquidity);
 
     error ZeroAddress();
     error NoActivePosition();
-    error NotOperator();
     error ReentrantCall();
 
     modifier nonReentrant() {
@@ -61,21 +58,14 @@ contract HydropumpAutoLP is Initializable, OwnableUpgradeable {
         _disableInitializers();
     }
 
-    function initialize(
-        address launchToken_,
-        address quoteToken_,
-        address pool_,
-        address locker_,
-        address feeEscrow_,
-        address owner_,
-        address operator_
-    ) external initializer {
+    function initialize(address launchToken_, address quoteToken_, address pool_, address locker_, address feeEscrow_)
+        external
+        initializer
+    {
         if (
             launchToken_ == address(0) || quoteToken_ == address(0) || pool_ == address(0) || locker_ == address(0)
-                || feeEscrow_ == address(0) || owner_ == address(0) || operator_ == address(0)
+                || feeEscrow_ == address(0)
         ) revert ZeroAddress();
-
-        __Ownable_init(owner_);
 
         launchToken = launchToken_;
         quoteToken = quoteToken_;
@@ -83,17 +73,11 @@ contract HydropumpAutoLP is Initializable, OwnableUpgradeable {
         locker = IHydropumpCompounder(locker_);
         feeEscrow = HydropumpFeeEscrow(feeEscrow_);
         escrowAccount = keccak256(abi.encode("HYDROPUMP_AUTO_LP_FEES", launchToken_));
-        operator = operator_;
     }
 
-    /// @notice Pull all accrued auto-LP fees and add the usable balances to the band active at the current tick.
+    /// @notice Anyone can compound accrued auto-LP fees into the band active at the current tick.
     /// @dev Unused assets remain in this strategy and are included in the next compounding cycle.
-    function execute(int24 expectedTick, uint24 maxTickDeviation, uint256 amount0Min, uint256 amount1Min)
-        external
-        nonReentrant
-        returns (uint128 liquidity, uint256 amount0, uint256 amount1)
-    {
-        if (msg.sender != operator) revert NotOperator();
+    function execute() external nonReentrant returns (uint128 liquidity, uint256 amount0, uint256 amount1) {
         feeEscrow.claim(escrowAccount, launchToken);
         feeEscrow.claim(escrowAccount, quoteToken);
 
@@ -117,17 +101,12 @@ contract HydropumpAutoLP is Initializable, OwnableUpgradeable {
         IERC20(launchToken).forceApprove(address(locker), balance0);
         IERC20(quoteToken).forceApprove(address(locker), balance1);
 
-        (liquidity, amount0, amount1) = locker.compound(
-            launchToken, activeIndex, balance0, balance1, amount0Min, amount1Min, expectedTick, maxTickDeviation
-        );
+        // No user-supplied tick or minima: the locker re-checks this exact tick before adding liquidity.
+        (liquidity, amount0, amount1) =
+            locker.compound(launchToken, activeIndex, balance0, balance1, 0, 0, currentTick, 0);
 
         IERC20(launchToken).forceApprove(address(locker), 0);
         IERC20(quoteToken).forceApprove(address(locker), 0);
         emit Compounded(activePositionId, amount0, amount1, liquidity);
-    }
-
-    function setOperator(address newOperator) external onlyOwner {
-        if (newOperator == address(0)) revert ZeroAddress();
-        operator = newOperator;
     }
 }

@@ -50,9 +50,7 @@ contract HydropumpAutoLPTest is Test {
         locker.setFeeEscrow(address(escrow));
 
         strategy = HydropumpAutoLP(Clones.clone(address(new HydropumpAutoLP())));
-        strategy.initialize(
-            address(token), address(quote), address(pool), address(locker), address(escrow), owner, owner
-        );
+        strategy.initialize(address(token), address(quote), address(pool), address(locker), address(escrow));
 
         uint256[] memory ids = new uint256[](2);
         (ids[0], ids[1]) = (1, 2);
@@ -71,8 +69,8 @@ contract HydropumpAutoLPTest is Test {
         npm.setOwed(1, 10_000, 5_000);
         locker.collect(address(token), 1);
 
-        vm.prank(owner);
-        strategy.execute(250, 5, 700, 350);
+        vm.prank(makeAddr("anyone"));
+        strategy.execute();
 
         assertEq(npm.increased0(2), 800);
         assertEq(npm.increased1(2), 400);
@@ -83,32 +81,28 @@ contract HydropumpAutoLPTest is Test {
 
     function test_RevertsWhenNoPositionIsActive() public {
         pool.setTick(350);
-        vm.prank(owner);
         vm.expectRevert(HydropumpAutoLP.NoActivePosition.selector);
-        strategy.execute(350, 5, 0, 0);
+        strategy.execute();
     }
 
-    function test_OnlyOperatorCanExecute() public {
-        vm.prank(makeAddr("stranger"));
-        vm.expectRevert(HydropumpAutoLP.NotOperator.selector);
-        strategy.execute(150, 5, 0, 0);
-    }
-
-    function test_OwnerCanRotateOperator() public {
-        address nextOperator = makeAddr("nextOperator");
-        vm.prank(owner);
-        strategy.setOperator(nextOperator);
-
+    function test_AnyoneCanExecuteAtCurrentTick() public {
         pool.setTick(150);
-        vm.prank(nextOperator);
-        strategy.execute(150, 5, 0, 0);
+        token.mint(NPM, 10_000);
+        quote.mint(NPM, 5_000);
+        npm.setOwed(1, 10_000, 5_000);
+        locker.collect(address(token), 1);
+
+        vm.prank(makeAddr("stranger"));
+        strategy.execute();
+
+        assertEq(npm.increased0(1), 800);
+        assertEq(npm.increased1(1), 400);
+        assertEq(npm.increased0(2), 0);
     }
 
     function test_ImplementationCannotBeInitialized() public {
         HydropumpAutoLP implementation = new HydropumpAutoLP();
         vm.expectRevert();
-        implementation.initialize(
-            address(token), address(quote), address(pool), address(locker), address(escrow), owner, owner
-        );
+        implementation.initialize(address(token), address(quote), address(pool), address(locker), address(escrow));
     }
 }

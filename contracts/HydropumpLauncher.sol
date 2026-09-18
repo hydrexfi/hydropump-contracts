@@ -322,7 +322,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
                 address implementation = autoLpImplementation;
                 if (implementation == address(0)) revert StrategyNotConfigured();
                 address strategy = Clones.clone(implementation);
-                HydropumpAutoLP(strategy).initialize(token, params.quoteToken, pool, locker, escrow, admin, owner());
+                HydropumpAutoLP(strategy).initialize(token, params.quoteToken, pool, locker, escrow);
                 routes[routeIndex++] =
                     IHydropumpLocker.FeeRoute({routeType: AUTO_LP_ROUTE, bps: autoLpBps, strategy: strategy});
                 emit AutoLpDeployed(token, strategy, autoLpBps);
