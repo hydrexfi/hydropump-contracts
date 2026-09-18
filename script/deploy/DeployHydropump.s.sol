@@ -8,6 +8,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {HydropumpLauncher} from "../../contracts/core/HydropumpLauncher.sol";
 import {HydropumpLocker} from "../../contracts/core/HydropumpLocker.sol";
 import {HydropumpBuyback} from "../../contracts/core/HydropumpBuyback.sol";
+import {HydropumpRewardDistributor} from "../../contracts/core/HydropumpRewardDistributor.sol";
 import {PairDirectory} from "../../contracts/helpers/PairDirectory.sol";
 import {FeeUseRegistry} from "../../contracts/helpers/FeeUseRegistry.sol";
 import {CreatorBalanceFeeUse} from "../../contracts/feeuses/CreatorBalanceFeeUse.sol";
@@ -18,8 +19,10 @@ import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.s
 
 /// @title DeployHydropump
 /// @dev Two identities, nothing else to configure:
-///        deployer  (DEPLOYER_KEY)      also the operator — owns the directory and launcher, runs the jobs
-///        admin     (HYDROPUMP_ADMIN)   the Safe — upgrades, and owns the locker, registry and buyback
+///        deployer  (DEPLOYER_KEY)        owns the directory and launcher
+///        admin     (HYDROPUMP_ADMIN)     the Safe — upgrades, and owns the locker, registry, buyback
+///                                        and distributor
+///        operator  (HYDROPUMP_OPERATOR)  the backend key that runs the jobs; defaults to the deployer
 ///
 ///      Order is forced by the references. The registry needs the launcher, the launcher needs the locker
 ///      and directory, and the fee uses need the locker — so everything goes up under the deployer,
@@ -38,15 +41,17 @@ contract DeployHydropump is Script {
         address deployer = vm.addr(deployerKey);
         address admin = vm.envAddress("HYDROPUMP_ADMIN");
         address gaugeBribe = vm.envOr("HYDROPUMP_GAUGE_BRIBE", HydropumpAddresses.GAUGE_BRIBE);
+        address operator = vm.envOr("HYDROPUMP_OPERATOR", deployer);
 
         console2.log("=== Hydropump Deployment ===");
-        console2.log("Deployer / operator:", deployer);
-        console2.log("Admin (Safe):       ", admin);
+        console2.log("Deployer:", deployer);
+        console2.log("Operator:", operator);
+        console2.log("Admin (Safe):", admin);
 
         vm.startBroadcast(deployerKey);
 
         // --- the pieces that reference nothing ---
-        HydropumpBuyback buyback = new HydropumpBuyback(admin, deployer, HydropumpAddresses.HYDX, gaugeBribe);
+        HydropumpBuyback buyback = new HydropumpBuyback(admin, operator, HydropumpAddresses.HYDX, gaugeBribe);
 
         PairDirectory directory = PairDirectory(
             address(
@@ -102,6 +107,10 @@ contract DeployHydropump is Script {
         registry.registerFeeUse(FeeUses.BUYBACK_BURN, address(buybackBurn));
         registry.setDefaultFeeUse(FeeUses.CREATOR_BALANCE);
 
+        // Emissions: the operator credits, the admin can rewrite and withdraw. Nothing references it, so
+        // it is wired to no one — the operator funds it out of band.
+        HydropumpRewardDistributor distributor = new HydropumpRewardDistributor(admin, operator);
+
         // --- wire the back-references, then hand over ---
         locker.setLauncher(address(launcher));
         locker.setFeeUseRegistry(address(registry));
@@ -128,6 +137,8 @@ contract DeployHydropump is Script {
         console2.log("AutoLpFeeUse:        ", address(autoLp));
         console2.log("BuybackBurnFeeUse:   ", address(buybackBurn));
         console2.log("HydropumpBuyback:    ", address(buyback));
+        console2.log("RewardDistributor:   ", address(distributor));
+        console2.log("operator:            ", operator);
         console2.log("Launch fee (wei):    ", uint256(LAUNCH_FEE));
         console2.log("\nSet LAUNCHER_ADDRESS and PAIR_DIRECTORY_ADDRESS in .env, then:");
         console2.log("  npm run quotes:build && npm run quotes:register:base");

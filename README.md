@@ -188,14 +188,15 @@ Both pair orderings are exercised throughout, because which one a launch gets is
 
 | | |
 | --- | --- |
-| `PairDirectory` | `0x920a21F69682Ea624eF8e6ca2Dd197A4E4595648` |
-| `HydropumpLauncher` | `0xbe0EF192f7b0624D81A2Cff5d987Aa354E324ffa` |
-| `HydropumpLocker` | `0x0E7990d166c21C4a38B2Ea4ECb2fFbB81b90525D` |
-| `FeeUseRegistry` | `0xd1fF094080301F4425F77eD95516c71108C4244C` |
-| `CreatorBalanceFeeUse` | `0x4E1c4E8e7c8f196857649e82445f7F973afB90dC` |
-| `AutoLpFeeUse` | `0xd480B7677cB35Dd767dCDc9728B1AaD9cFf54Dde` |
-| `BuybackBurnFeeUse` | `0x39b87FB1f6a863b02FEF0Fe65D0Ac90a003D819b` |
-| `HydropumpBuyback` | `0x5f36C6F20430823251aF5e6658d3bf5cF54449b4` |
+| `PairDirectory` | `0x86F4Ff7b66De9fB8580DB4892c40514479828B6A` |
+| `HydropumpLauncher` | `0xB4209c5D03bA37f63e495d951EFc017f6332f5aE` |
+| `HydropumpLocker` | `0xe1137758d2168617cfa7C8103cbF935f5b1DB1E5` |
+| `FeeUseRegistry` | `0x665B8666693dC6154E3BAACBA739df66b29D300D` |
+| `CreatorBalanceFeeUse` | `0x51851B4ddc4457b5023b332B413dFFf8967a6fb9` |
+| `AutoLpFeeUse` | `0xB2bA61dF25e6D7DB73FaD75075ed8E92F0Eb0cfE` |
+| `BuybackBurnFeeUse` | `0xA1079f4B5A8f1568dc09CFC5E6e22d67cDDAcc14` |
+| `HydropumpBuyback` | `0xe3cD62d4dC36D0e751D1C4AC6a6Fc22d632e611a` |
+| `HydropumpRewardDistributor` | `0x24533D77817e65901003b79D0529eDA88098371d` |
 
 Deployed at block `51444026`. Indexed by `hydrex-dummy/0.2.0`.
 

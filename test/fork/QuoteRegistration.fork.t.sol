@@ -13,8 +13,6 @@ import {PairDirectory} from "../../contracts/helpers/PairDirectory.sol";
 ///      rather than pranking a live owner. What it checks is the same: that the generated file applies
 ///      cleanly, that every entry lands, and that a retired quote ends up registered-but-disabled.
 contract QuoteRegistrationForkTest is Test {
-    address internal constant WSTETH = 0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452;
-
     PairDirectory internal directory;
     address internal owner = makeAddr("owner");
     address internal admin = makeAddr("admin");
@@ -72,10 +70,17 @@ contract QuoteRegistrationForkTest is Test {
             }
         }
 
-        // wstETH is the delisting: still registered, but no longer launchable.
-        (bool wstEnabled,, uint64 wstUpdated) = directory.quoteTokens(WSTETH);
-        assertFalse(wstEnabled, "wstETH must be disabled");
-        assertGt(wstUpdated, 0, "wstETH must stay registered");
+        // A delisting stays registered and stops being launchable, rather than disappearing — asserted
+        // over whatever the file marks disabled rather than a named token, since which token that is
+        // changes every time the generator runs.
+        for (uint256 i = 0; i < total; i++) {
+            if (enabled[i]) continue;
+
+            (bool isEnabled,, uint64 updatedAt) = directory.quoteTokens(addresses[i]);
+            assertFalse(isEnabled, "a delisted quote must not be launchable");
+            assertGt(updatedAt, 0, "a delisted quote must stay registered");
+            assertFalse(directory.isEnabled(addresses[i]));
+        }
     }
 
     /// The daily job only ever reprices what is already listed, so replaying the same file through the
