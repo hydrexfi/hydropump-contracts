@@ -14,10 +14,17 @@ import {IFeeUse} from "../interfaces/IFeeUse.sol";
 import {INonfungiblePositionManager} from "../interfaces/INonfungiblePositionManager.sol";
 import {ISwapRouter} from "../interfaces/ISwapRouter.sol";
 import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
+import {FeeSwapProtection} from "../libraries/FeeSwapProtection.sol";
 
 /// @title HydropumpLocker
 /// @notice Holds every launch's positions permanently and splits the fees they earn.
-contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable, IERC721Receiver, IHydropumpLocker {
+contract HydropumpLocker is
+    Initializable,
+    Ownable2StepUpgradeable,
+    UUPSUpgradeable,
+    IERC721Receiver,
+    IHydropumpLocker
+{
     using SafeERC20 for IERC20;
 
     INonfungiblePositionManager public constant nonfungiblePositionManager =
@@ -213,9 +220,8 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     /// @notice `splitRewards` over a chosen set of bands.
     /// @param positionMask Bit `i` selects position `i`. Use `fullMask(token)` for all. The keeper
     ///        `eth_call`s with the full mask to see per-band amounts, then sends only the bands worth the gas.
-    /// @dev Books both shares and moves nothing out. Every creator's money flows through here, so it
-    ///      must never be able to fail: it touches no pool, no swap and no third-party contract. Spending
-    ///      is `spendCreatorShare` and `convertProtocolShare`, which may fail freely.
+    /// @dev Collection calls the external position manager and can fail on restricted token transfers.
+    ///      It does not depend on strategy execution or swap price protection.
     function splitRewards(address token, uint256 positionMask) public returns (uint256 toCreator, uint256 toProtocol) {
         Launch storage launch = _launches[token];
         address quoteToken = launch.quoteToken;
@@ -373,13 +379,8 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
 
     /// @notice Sell the protocol's launch-token share into the launch's own pool, so only the quote token
     ///         ever reaches the buyback. Permissionless; every destination is fixed.
-    /// @dev No price bound. Whoever calls this does not choose the price and takes none of the output —
-    ///      it is credited to the protocol either way — so the worst a sandwich achieves is giving the
-    ///      protocol less quote than it might have got. That is a cost worth paying to keep the call
-    ///      simple and always executable; a bound that can fail is a call that can be stuck.
-    ///
-    ///      Isolated from `splitRewards` on purpose: this is the part that can fail, and nothing else
-    ///      should fail with it.
+    /// @dev Requires 30 minutes of oracle history and at least 98% of the TWAP quote.
+    ///      An unsafe fill reverts, preserving the booked share for later execution.
     function convertProtocolShare(address token) external returns (uint256 quoteOut) {
         Launch storage launch = _launches[token];
         if (launch.pool == address(0)) revert UnknownLaunch();
@@ -467,9 +468,9 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         return token < quoteToken ? (total0, total1) : (total1, total0);
     }
 
-    /// @dev Sells into the launch's own pool with no minimum out. See `convertProtocolShare` for why the
-    ///      absence of a bound is a deliberate trade rather than an oversight.
+    /// @dev Uses the pool plugin's historical oracle, never a caller-selected minimum or spot quote.
     function _convert(address token, address quoteToken, uint256 amountIn) internal returns (uint256 quoteOut) {
+        uint256 minimum = FeeSwapProtection.minimumOutput(_launches[token].pool, token, quoteToken, amountIn);
         IERC20(token).forceApprove(address(swapRouter), amountIn);
         quoteOut = swapRouter.exactInputSingle(
             ISwapRouter.ExactInputSingleParams({
@@ -479,7 +480,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
                 recipient: address(this),
                 deadline: block.timestamp,
                 amountIn: amountIn,
-                amountOutMinimum: 0,
+                amountOutMinimum: minimum,
                 limitSqrtPrice: 0
             })
         );

@@ -14,6 +14,16 @@ import {ForkFixture} from "./helpers/ForkFixture.sol";
 /// @dev Written against a launch on the token0 side; `FeeFlowMirroredForkTest` repeats every case with the
 ///      launch token sorting above its quote.
 contract FeeFlowForkTest is ForkFixture {
+    function test_ProtocolSellRejectsAdverseSpotAndKeepsFees() public onlyForked {
+        (address token,,) = _tradedLaunch(FeeUses.CREATOR_BALANCE);
+        locker.splitRewards(token);
+        uint256 credit = locker.protocolOwed(token);
+        _sell(alice, token, WETH, IERC20(token).balanceOf(alice));
+        vm.expectRevert();
+        locker.convertProtocolShare(token);
+        assertEq(locker.protocolOwed(token), credit);
+    }
+
     /// @dev Overridden by the mirrored suite.
     function _wantToken0() internal pure virtual returns (bool) {
         return true;
@@ -89,8 +99,8 @@ contract FeeFlowForkTest is ForkFixture {
         assertEq(locker.protocolOwed(token), 0);
     }
 
-    /// A pool minutes old converts perfectly well now that nothing asks it for a price history.
-    function test_AYoungPoolConvertsFine() public onlyForked {
+    /// Young pools retain fees until the historical reference is available.
+    function test_AYoungPoolWaitsForOracleHistory() public onlyForked {
         (address token,,,) = _launchOnSide(WETH, _wantToken0(), FeeUses.CREATOR_BALANCE);
         uint256 bought = _swapIn(alice, WETH, token, 1 ether);
         _sell(alice, token, WETH, bought / 2); // a sell, so there is a launch-token share to convert
@@ -98,7 +108,12 @@ contract FeeFlowForkTest is ForkFixture {
         locker.splitRewards(token);
         assertGt(locker.protocolOwed(token), 0);
 
-        assertGt(locker.convertProtocolShare(token), 0, "no oracle, no waiting");
+        uint256 credit = locker.protocolOwed(token);
+        vm.expectRevert();
+        locker.convertProtocolShare(token);
+        assertEq(locker.protocolOwed(token), credit);
+        _ageTwapWindow(token, WETH);
+        assertGt(locker.convertProtocolShare(token), 0, "history now available");
         assertEq(locker.protocolOwed(token), 0);
     }
 

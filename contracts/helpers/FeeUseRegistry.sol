@@ -85,8 +85,7 @@ contract FeeUseRegistry is Initializable, Ownable2StepUpgradeable, UUPSUpgradeab
                                 ADMIN
     //////////////////////////////////////////////////////////////*/
 
-    /// @dev Write-once. Repointing an id under launches that already chose it would move their money
-    ///      without their knowing, so a new strategy is a new id.
+    /// @dev Initial registration rejects overwrites. Owner replacements use the explicit replaceFeeUse path.
     function registerFeeUse(bytes32 feeUse, address implementation) external onlyOwner {
         if (feeUse == bytes32(0)) revert UnknownFeeUse();
         if (implementation == address(0)) revert ZeroAddress();

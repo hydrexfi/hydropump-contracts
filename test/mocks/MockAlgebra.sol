@@ -43,9 +43,24 @@ contract MockAlgebraPool {
     address public token1;
     int24 public tickSpacing;
     uint160 public price;
+    int24 public oracleTick;
 
     function init(address _token0, address _token1, int24 _tickSpacing, uint160 _price) external {
         (token0, token1, tickSpacing, price) = (_token0, _token1, _tickSpacing, _price);
+        oracleTick = MockTickMath.tickAtSqrtRatio(_price);
+    }
+
+    // Unit-test oracle: historical tick is independent of spot. Real history is covered on a fork.
+    function plugin() external view returns (address) {
+        return address(this);
+    }
+
+    function getTimepoints(uint32[] calldata ago) external view returns (int56[] memory ticks, uint88[] memory vols) {
+        ticks = new int56[](ago.length);
+        vols = new uint88[](ago.length);
+        for (uint256 i; i < ago.length; i++) {
+            ticks[i] = -int56(oracleTick) * int56(uint56(ago[i]));
+        }
     }
 
     function setPrice(uint160 _price) external {
@@ -299,7 +314,10 @@ contract MockSwapRouter {
         (feePips, bump) = (_feePips, _bump);
     }
 
-    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params) external returns (uint256 amountOut) {
+    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params)
+        external
+        returns (uint256 amountOut)
+    {
         (address token0, address token1) =
             params.tokenIn < params.tokenOut ? (params.tokenIn, params.tokenOut) : (params.tokenOut, params.tokenIn);
 

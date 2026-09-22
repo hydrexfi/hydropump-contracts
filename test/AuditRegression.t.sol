@@ -10,6 +10,77 @@ import {HydropumpLauncher} from "../contracts/core/HydropumpLauncher.sol";
 import {PairDirectory} from "../contracts/helpers/PairDirectory.sol";
 
 contract AuditRegressionTest is HydropumpFixture {
+    function test_ExpiryBoundaryAndBothOrientations() public {
+        uint256 written = block.timestamp;
+        vm.warp(written + 1 days);
+        assertTrue(directory.isEnabled(HIGH_QUOTE));
+        vm.warp(written + 1 days + 1);
+        vm.expectRevert(PairDirectory.StalePrice.selector);
+        directory.requirePoolStartTick(address(1), HIGH_QUOTE);
+        vm.expectRevert(PairDirectory.StalePrice.selector);
+        directory.requirePoolStartTick(address(type(uint160).max), HIGH_QUOTE);
+    }
+
+    function test_FileTimestampIsPreservedAndCannotBeRenewedByReplay() public {
+        vm.warp(10 days);
+        address[] memory quotes = new address[](1);
+        int24[] memory ticks = new int24[](1);
+        bool[] memory enabled = new bool[](1);
+        quotes[0] = HIGH_QUOTE;
+        ticks[0] = WETH_START_TICK;
+        enabled[0] = true;
+        uint64 observed = uint64(block.timestamp - 1 hours);
+        vm.startPrank(owner);
+        directory.configureQuoteTokensWithTimestamp(quotes, enabled, ticks, observed);
+        (,, uint64 stored) = directory.quoteTokens(HIGH_QUOTE);
+        assertEq(stored, observed);
+        vm.warp(block.timestamp + 1 days);
+        vm.expectRevert(PairDirectory.StalePrice.selector);
+        directory.setStartTicksWithTimestamp(quotes, ticks, observed);
+        vm.expectRevert(PairDirectory.StalePrice.selector);
+        directory.configureQuoteTokensWithTimestamp(quotes, enabled, ticks, uint64(block.timestamp + 1));
+        vm.stopPrank();
+    }
+
+    function test_RetryExhaustionHasPermissionlessRecovery() public {
+        uint64 nonce = vm.getNonce(address(launcher));
+        for (uint64 i; i < 4; i++) {
+            address predicted = vm.computeCreateAddress(address(launcher), nonce + i);
+            npm.createAndInitializePoolIfNecessary(
+                predicted, HIGH_QUOTE, address(0), TickMath.getSqrtRatioAtTick(WETH_START_TICK + 7000), ""
+            );
+        }
+        vm.expectRevert(HydropumpLauncher.TooManyPoisonedPools.selector);
+        this.launchForTest(HIGH_QUOTE);
+        assertEq(vm.getNonce(address(launcher)), nonce);
+        vm.prank(stranger);
+        address skipped = launcher.skipPoisonedLaunch(HIGH_QUOTE);
+        assertEq(IERC20(skipped).totalSupply(), 0);
+        assertEq(vm.getNonce(address(launcher)), nonce + 1);
+        (address token,,) = _launch(HIGH_QUOTE);
+        assertTrue(token != skipped);
+    }
+
+    function test_CleanCandidateCannotBeDiscarded() public {
+        uint64 nonce = vm.getNonce(address(launcher));
+        vm.expectRevert(HydropumpLauncher.PoolNotPoisoned.selector);
+        launcher.skipPoisonedLaunch(HIGH_QUOTE);
+        assertEq(vm.getNonce(address(launcher)), nonce);
+    }
+
+    function test_MissingOraclePreservesBothFeeLedgers() public {
+        (address token, address pool,) = _launch(HIGH_QUOTE, FeeUses.BUYBACK_BURN, 0);
+        _accrueFees(token, 40_000e18, 1 ether);
+        locker.splitRewards(token);
+        vm.mockCall(pool, abi.encodeWithSignature("plugin()"), abi.encode(address(0)));
+        vm.expectRevert();
+        locker.spendCreatorShare(token);
+        assertEq(locker.creatorOwed(token, HIGH_QUOTE), 0.75 ether);
+        vm.expectRevert();
+        locker.convertProtocolShare(token);
+        assertEq(locker.protocolOwed(token), 10_000e18);
+    }
+
     function test_ExpiredQuoteCannotLaunch() public {
         vm.warp(block.timestamp + 1 days + 1);
         assertFalse(directory.isEnabled(HIGH_QUOTE), "stale quote must not be offered");

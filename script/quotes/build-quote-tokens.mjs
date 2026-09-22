@@ -16,7 +16,7 @@
 // One number per quote covers both orientations. This is the reading for a launch token that sorts below
 // its quote and so lands on the token0 side; a launch that sorts above it gets the reciprocal price, which
 // is the same tick negated, and the launcher does that itself. Nothing here has to know which side a given
-// launch will land on — the CREATE2 address decides, at launch time.
+// launch will land on — the CREATE address decides, at launch time.
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
@@ -27,6 +27,8 @@ const TARGET_START_MCAP_USD = 5_000;
 const MIN_TICK = -887272;
 const MAX_TICK = 887272;
 const TAIL_WIDTH = 887_200;
+const NOW = Math.floor(Date.now() / 1000);
+const MAX_PRICE_AGE = 24 * 60 * 60;
 
 // hydrex-lists checkout, or a raw URL to its generated token list.
 const LIST_SOURCE = process.env.QUOTE_LIST ?? "../hydrex-lists/tokens/8453.json";
@@ -74,6 +76,10 @@ for (const t of listed) {
     reject("no price");
     continue;
   }
+  const observedAt = Math.floor(Date.parse(asset.updatedAt) / 1000);
+  if (!Number.isFinite(observedAt) || observedAt <= 0 || observedAt > NOW || NOW - observedAt > MAX_PRICE_AGE) {
+    throw new Error(`stale, future, or missing price timestamp for ${t.symbol}`);
+  }
   if (asset.decimals !== t.decimals) {
     reject(`decimals disagree: list ${t.decimals}, api ${asset.decimals}`);
     continue;
@@ -97,10 +103,12 @@ for (const t of listed) {
     priceUsd: asset.price,
     startTick: tick,
     priceUsdE8: Math.round(asset.price * 1e8),
+    observedAt,
   });
 }
 
 entries.sort((x, y) => x.category.localeCompare(y.category) || x.symbol.localeCompare(y.symbol));
+if (!entries.length) throw new Error("no fresh priced quotes; refusing to overwrite the registration file");
 
 // Anything registered by an earlier generation but no longer listed has to be explicitly disabled:
 // configureQuoteTokens upserts per address, so dropping a token from the arrays leaves it live
@@ -121,6 +129,7 @@ if (previous) {
 
 const out = {
   generatedAt: new Date().toISOString(),
+  priceObservedAt: Math.min(...entries.map((e) => e.observedAt)),
   source: ASSETS_URL,
   listSource: LIST_SOURCE,
   launchSupply: LAUNCH_SUPPLY,

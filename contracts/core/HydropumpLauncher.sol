@@ -29,6 +29,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     ISwapRouter public constant swapRouter = ISwapRouter(HydropumpAddresses.SWAP_ROUTER);
 
     uint256 public constant SUPPLY = 10_000_000_000e18;
+    uint256 public constant MAX_POOL_ATTEMPTS = 4;
 
     struct LaunchParams {
         string name;
@@ -76,6 +77,10 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     error QuoteConsumed();
     error BandOutOfRange();
     error DirectoryUnset();
+    error TooManyPoisonedPools();
+    error PoolNotPoisoned();
+
+    event PoisonedPoolSkipped(address indexed token, address indexed pool);
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -172,25 +177,25 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         address directory = pairDirectory;
         if (directory == address(0)) revert DirectoryUnset();
 
-        token = address(new HydropumpToken(params.name, params.symbol, SUPPLY));
-
+        int24 startTick;
+        bool clean;
+        for (uint256 attempt; attempt < MAX_POOL_ATTEMPTS; attempt++) {
+            (token, pool, startTick, clean) = _openCandidate(params.name, params.symbol, params.quoteToken, SUPPLY);
+            if (clean) break;
+            HydropumpToken(token).burn(SUPPLY);
+            emit PoisonedPoolSkipped(token, pool);
+        }
+        if (!clean) revert TooManyPoisonedPools();
         bool isToken0 = token < params.quoteToken;
-        int24 startTick = IPairDirectory(directory).requirePoolStartTick(token, params.quoteToken);
-
-        (address token0, address token1) = isToken0 ? (token, params.quoteToken) : (params.quoteToken, token);
-
-        pool = nonfungiblePositionManager.createAndInitializePoolIfNecessary(
-            token0, token1, address(0), TickMath.getSqrtRatioAtTick(startTick), ""
-        );
-        if (pool == address(0)) revert PoolCreationFailed();
 
         positionIds = _mintBands(token, params.quoteToken, pool, startTick, isToken0);
 
         if (params.buyAmount > 0) _buy(token, params.quoteToken, params.buyAmount);
 
         address creatorRecipient = params.creatorRecipient == address(0) ? msg.sender : params.creatorRecipient;
-        IHydropumpLocker(locker)
-            .registerLaunch(token, params.quoteToken, pool, msg.sender, creatorRecipient, positionIds);
+        IHydropumpLocker(locker).registerLaunch(
+            token, params.quoteToken, pool, msg.sender, creatorRecipient, positionIds
+        );
 
         if (feeUseRegistry != address(0)) {
             IFeeUseRegistry(feeUseRegistry).setLaunchFeeUse(token, params.feeUse);
@@ -213,6 +218,31 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
             params.feeUse,
             uint64(block.timestamp)
         );
+    }
+
+    /// @notice Persistently advance past one poisoned CREATE address if automatic retries are exhausted.
+    /// @dev Permissionless; deploys a zero-supply discarded token. Reverts (including nonce advancement)
+    ///      unless this candidate's pool is already initialized at a different price. No ETH required.
+    function skipPoisonedLaunch(address quoteToken) external returns (address token) {
+        address pool;
+        bool clean;
+        (token, pool,, clean) = _openCandidate("Discarded Hydropump candidate", "DISCARD", quoteToken, 0);
+        if (clean) revert PoolNotPoisoned();
+        emit PoisonedPoolSkipped(token, pool);
+    }
+
+    function _openCandidate(string memory name, string memory symbol, address quoteToken, uint256 supply)
+        internal
+        returns (address token, address pool, int24 startTick, bool clean)
+    {
+        token = address(new HydropumpToken(name, symbol, supply));
+        startTick = IPairDirectory(pairDirectory).requirePoolStartTick(token, quoteToken);
+        (address token0, address token1) = token < quoteToken ? (token, quoteToken) : (quoteToken, token);
+        uint160 expected = TickMath.getSqrtRatioAtTick(startTick);
+        pool = nonfungiblePositionManager.createAndInitializePoolIfNecessary(token0, token1, address(0), expected, "");
+        if (pool == address(0)) revert PoolCreationFailed();
+        (uint160 actual,,,,,) = IAlgebraPool(pool).globalState();
+        clean = actual == expected;
     }
 
     /*//////////////////////////////////////////////////////////////

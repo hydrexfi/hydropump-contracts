@@ -77,9 +77,9 @@ contract HydropumpLaunchForkTest is ForkFixture {
         console2.log("HYDX-quoted launch", token);
     }
 
-    /// There is nothing to supply, nothing to mine, and nothing to predict. An address comes out of
-    /// `CREATE` and the `Launched` event is where anyone finds out what it was.
-    function test_AddressesAreOnlyKnowableAfterTheFact() public onlyForked {
+    /// CREATE candidates are predictable, but retries can change which one becomes the launch.
+    /// Consumers should read the final token from the event.
+    function test_LaunchedEventIdentifiesTheFinalAddress() public onlyForked {
         vm.recordLogs();
         (address token,,) = _launchFrom(creator, WETH, bytes32(0), 0);
 

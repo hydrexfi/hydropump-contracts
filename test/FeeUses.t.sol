@@ -243,19 +243,20 @@ contract FeeUsesTest is HydropumpFixture {
         assertEq(IERC20(token).totalSupply(), supplyBefore - 30_000e18);
     }
 
-    /// No price bound, deliberately: the caller takes none of the output — every token bought is burned —
-    /// so a bad fill costs the burn size and nothing else, and the call can never be stuck behind one.
-    function test_BuybackBurnFillsWhateverThePoolGives() public {
+    /// Caller-independent TWAP protection rejects an adverse spot fill in either orientation.
+    function test_BuybackBurnRejectsManipulatedSpot() public {
         (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
 
-        // Spot shoved a long way against the buy. It still goes through.
+        // Spot shoved a long way against the buy; booked funds must survive the rejected fill.
         int24 shoved = _currentTick(pool) + (token < _quote() ? int24(40_000) : int24(-40_000));
         MockAlgebraPool(pool).setPrice(TickMath.getSqrtRatioAtTick(shoved));
 
         uint256 supplyBefore = IERC20(token).totalSupply();
+        vm.expectRevert("Too little received");
         locker.spendCreatorShare(token);
-        assertGt(buybackBurn.lifetimeBurned(token), 0);
-        assertLt(IERC20(token).totalSupply(), supplyBefore);
+        assertEq(buybackBurn.lifetimeBurned(token), 0);
+        assertEq(IERC20(token).totalSupply(), supplyBefore);
+        assertEq(locker.creatorOwed(token, _quote()), 0.75 ether);
     }
 
     function test_OnlyTheEscrowCanDeliverToBuybackBurn() public {
@@ -289,20 +290,20 @@ contract FeeUsesTest is HydropumpFixture {
 
         // Protocol only: converts and delivers, and pays the creator nothing.
         (address swept,,) = _launch(_quote(), FeeUses.CREATOR_BALANCE, 0);
-        _accrueFees(swept, 40_000, 8_000);
+        _accrueFees(swept, 40_000e18, 8_000);
         _seedPoolQuote(swept, 10e18);
 
         vm.prank(stranger);
         locker.handleProtocolRewards(swept);
         assertEq(locker.protocolOwed(swept), 0, "converted");
         assertGt(IERC20(_quote()).balanceOf(buyback), 0, "and delivered to the buyback");
-        assertEq(locker.creatorOwed(swept, swept), 30_000, "the creator's side is booked, not spent");
+        assertEq(locker.creatorOwed(swept, swept), 30_000e18, "the creator's side is booked, not spent");
     }
 
     /// A broken fee use takes the creator path down but must not take the protocol path with it.
     function test_ProtocolPathIsIndependentOfTheCreatorPath() public {
         (address token,,) = _launch(_quote(), FeeUses.CREATOR_BALANCE, 0);
-        _accrueFees(token, 40_000, 8_000);
+        _accrueFees(token, 40_000e18, 8_000);
         _seedPoolQuote(token, 10e18);
 
         // Deployed first: `prank` binds to the very next call, and `new` would consume it.
@@ -316,7 +317,7 @@ contract FeeUsesTest is HydropumpFixture {
         // The protocol still gets paid, and the creator's share stays booked.
         locker.handleProtocolRewards(token);
         assertGt(IERC20(_quote()).balanceOf(buyback), 0);
-        assertEq(locker.creatorOwed(token, token), 30_000, "still waiting, still payable");
+        assertEq(locker.creatorOwed(token, token), 30_000e18, "still waiting, still payable");
     }
 
     /// What the button actually calls. One transaction takes a launch from uncollected fees to spent, on

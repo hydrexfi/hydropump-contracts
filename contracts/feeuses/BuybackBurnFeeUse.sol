@@ -9,12 +9,12 @@ import {IFeeUse} from "../interfaces/IFeeUse.sol";
 import {IHydropumpLocker} from "../interfaces/IHydropumpLocker.sol";
 import {ISwapRouter} from "../interfaces/ISwapRouter.sol";
 import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
+import {FeeSwapProtection} from "../libraries/FeeSwapProtection.sol";
 
 /// @title BuybackBurnFeeUse
 /// @notice Spends a launch's fees buying its own token back and destroying it.
 /// @dev The quote side is swapped in the launch's own pool and burned with whatever launch token arrived
-///      directly. No price bound: the caller takes none of the output, so a bad fill only shrinks the
-///      burn, and a bound could leave the call stuck.
+///      directly. Swaps require a historical oracle floor; unsafe fills leave fees booked in the locker.
 contract BuybackBurnFeeUse is IFeeUse {
     using SafeERC20 for IERC20;
 
@@ -48,6 +48,7 @@ contract BuybackBurnFeeUse is IFeeUse {
 
         uint256 bought;
         if (quoteAmount > 0) {
+            uint256 minimum = FeeSwapProtection.minimumOutput(locker.poolOf(token), quoteToken, token, quoteAmount);
             IERC20(quoteToken).forceApprove(address(swapRouter), quoteAmount);
             bought = swapRouter.exactInputSingle(
                 ISwapRouter.ExactInputSingleParams({
@@ -57,7 +58,7 @@ contract BuybackBurnFeeUse is IFeeUse {
                     recipient: address(this),
                     deadline: block.timestamp,
                     amountIn: quoteAmount,
-                    amountOutMinimum: 0,
+                    amountOutMinimum: minimum,
                     limitSqrtPrice: 0
                 })
             );

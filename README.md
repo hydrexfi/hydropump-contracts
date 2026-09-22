@@ -1,277 +1,174 @@
 # Hydropump
 
-Permissionless token launch contracts for [Hydrex](https://hydrex.fi) on Base.
+Permissionless token launch contracts for Hydrex on Base.
 
-`launch()` deploys a fixed-supply ERC20, opens its pool against a whitelisted quote token, seeds it with
-five single-sided liquidity bands, and locks every position forever. Trading fees split 75% to whatever the
-launch chose to spend them on and 25% to the protocol, which converts its share to the quote token and
-bribes the Hydropump gauge with it.
+A launch deploys a fixed-supply, burnable ERC20, creates its quote-token pool, seeds five single-sided
+liquidity positions, and sends their NFTs to the locker. The default split of collected LP fees is
+75% to the creator-selected fee use and 25% to the protocol buyback.
 
-## Contracts
+## Contracts and trust
 
-```
-contracts/
-  core/       Launcher, Locker, Token, Buyback, RewardDistributor
-  helpers/    PairDirectory, FeeUseRegistry, GaugeToken
-  feeuses/    the three things a creator's share can become
-  interfaces/ libraries/
-```
+| Contract | Responsibility | Upgrade/control |
+| --- | --- | --- |
+| PairDirectory | Quote allowlist and opening-price ticks | Owner refreshes; admin upgrades |
+| HydropumpLauncher | Token deployment, bands, optional initial buy | Admin upgrades and sets pointers |
+| HydropumpLocker | NFT custody and per-asset fee accounting | Owner upgrades and sets split/destinations |
+| FeeUseRegistry | Maps launches to fee uses | Owner replaces implementations and choices |
+| CreatorBalanceFeeUse | Pays the current creator recipient | Immutable implementation |
+| AutoLpFeeUse | Adds fees to the active or nearest locked band | Immutable implementation |
+| BuybackBurnFeeUse | Buys and burns launch tokens with a historical output floor | Immutable implementation |
+| HydropumpBuyback | Operator routes quote assets to HYDX and bribes the gauge | Owner/operator controls |
+| HydropumpRewardDistributor | Funded allocations and recipient claims | Owner can rewrite or withdraw allocations |
+| HydropumpToken | Initial 10 billion supply, burnable, permit | No owner, proxy, or further minting |
+| HydropumpGaugeToken | Fixed-supply gauge seed token | No further minting |
 
-| Contract               | Upgradeable |                                                                                     |
-| ---------------------- | ----------- | ----------------------------------------------------------------------------------- |
-| `PairDirectory`        | UUPS        | What is launchable, and what one launch token is worth in each quote. Repriced daily |
-| `HydropumpLauncher`    | UUPS        | Deploys the token, creates the pool, mints the bands, hands them to the locker       |
-| `HydropumpToken`       | no          | Plain immutable ERC20 — burnable, permit, no owner, no mint path, not a proxy        |
-| `HydropumpLocker`      | UUPS        | Holds every launch's positions permanently and splits the fees they earn             |
-| `FeeUseRegistry`       | UUPS        | Which strategy each launch's creator share is spent on. Holds no tokens              |
-| `CreatorBalanceFeeUse` | no          | Creator share is paid straight to the creator's recipient                            |
-| `AutoLpFeeUse`         | no          | Creator share goes back into the launch's own locked curve, permanently              |
-| `BuybackBurnFeeUse`    | no          | Creator share buys the token in its own pool and burns it                            |
-| `HydropumpBuyback`     | no          | Quote → HYDX via KyberSwap, then bribes the Hydropump gauge                          |
-| `HydropumpGaugeToken`  | no          | Placeholder ERC20 for the pair the Hydropump gauge hangs off                         |
-| `HydropumpRewardDistributor` | no    | Operator credits rewards, recipients withdraw. Owner can rewrite and withdraw        |
+The current locker has no ordinary NFT transfer or liquidity withdrawal path. **Custody is nevertheless
+upgradeable**: its owner can install different code. Do not describe it as an immutable permanent lock.
+Registry choices and the fee split are also administratively changeable.
 
-```
-        PairDirectory ──whitelists pairs, daily quote rates──▶ HydropumpLauncher
-                                                                     │
-                                                  single-sided liquidity, locked
-                                                                     ▼
-                         ┌──────────────── 25% ──────────  HydropumpLocker  ──── 75% ───────────┐
-                         │                             spendRewards(token), public              │
-                         ▼                                              books both shares, then  │
-                 HydropumpBuyback                                        pushes the creator's ───┤
-        (launch-token share sold to quote first,                                                 │
-          so only quote ever lands here)                      FeeUseRegistry ── names where ─────┘
-                                                        TOKEN → FEE_USE, admin-settable, default
-                                            ┌───────────────────┬───────────────────┐
-                                            ▼                   ▼                   ▼
-                                    CreatorBalance          AutoLP            BuybackBurn
-```
+## Launch curve
 
-## How a launch works
+| Band | Tick offsets from aligned base | Initial supply share |
+| --- | --- | ---: |
+| 0 | 0–14,000 | 5.47% |
+| 1 | 14,000–36,000 | 13.36% |
+| 2 | 36,000–62,000 | 18.22% |
+| 3 | 62,000–150,000 | 22.47% |
+| 4 | 150,000–887,200, clamped to usable ticks | 40.48% |
 
-- **Supply** 10,000,000,000, all of it deployed as liquidity. Nothing is held back.
-- **Bands** five, at tick offsets `0 / 14k / 36k / 62k / 92k / 887.2k` from the start tick, holding
-  `9 / 22 / 30 / 37 / 2%` of supply. Offsets, not absolute ticks, so the curve is quote-agnostic, and
-  unsigned distances rather than directions — see **Pair ordering**. Bands are aligned to the pool's actual
-  tick spacing at launch time, and band 0 is always the one adjacent to the opening price.
-- **Start tick** per quote token, in the **directory**, refreshed as the quote's USD price moves. No oracle.
-  `node script/quotes/build-quote-tokens.mjs` derives ticks for every eligible asset from the live Hydrex list.
-  One number per quote covers both orientations: it is the token0-side reading, and the launcher negates it
-  for the other side.
-- **Pair ordering** the launch token can be *either* side of the pool. Algebra sorts a pair by address, and
-  a launch does not control its own. When the launch token is token0 the pool opens at the stored start tick
-  and the bands run **up** from it; when it is token1 the pool opens at the **negated** tick — the same
-  price, inverted — and the same bands run **down**. Either way the liquidity is pure launch token, because
-  token0 liquidity lives above the price and token1 liquidity below it. `launchIsToken0(token, quote)` and
-  `poolStartTick(token, quote)` give the orientation and the opening tick.
-- **No salts** a launch token is deployed with plain `CREATE`, so its address is not knowable beforehand —
-  read it from the `Launched` event in the receipt. The curve mirrors, so a token works on either side of
-  its pair and no address needs mining.
-- **Fee use** a creator picks at launch what their share is spent on — paid out, auto-LP back into their
-  own locked curve, or a buyback-and-burn. The choice is an id in the registry; blank rides the default.
-  An admin can repoint a launch later, so read it back from the registry rather than the `Launched` event.
-- **Locked** positions go straight to the locker, which exposes no transfer, withdraw, burn, or
-  decrease-liquidity path.
-- **Dev buy** set `buyAmount` to spend that much quote token buying the launch token in the same
-  transaction, sent to the caller. `0` skips it. Approve the launcher for the quote token first.
-- **Launch fee** at least `launchFee()` (0.00001 ETH) sent as `msg.value`, purely to make spamming launches
-  cost something. Overpayment is kept, not refunded. The ETH sits in the launcher until the admin sweeps it
-  with `claimLaunchFees`.
+Offsets are mirrored when the launch token sorts above the quote token. Boundaries align to the pool's
+tick spacing; all initial deposits are launch-token-only. Unused mint-rounding dust is burned.
+The opening USD FDV targets roughly $5,000 using the directory's quote valuation. USD results change
+with the quote's market price; the pool itself trades token ratios.
 
-### Where the fees go
+CREATE addresses are predictable from the launcher nonce. Every candidate pool's actual opening sqrt
+price is checked against the intended price. A launch burns the supply of a mismatched candidate and
+tries the next address, up to four candidates. If all four are poisoned, the transaction reverts.
+Anyone can call `skipPoisonedLaunch(quoteToken)` to persistently advance past one poisoned address,
+then retry. This deploys a zero-supply discarded token, takes no fee, and reverts for a clean candidate.
+Use the `Launched` event for the final address; do not assume it is the first predicted candidate.
 
-Three entry points on the locker, all permissionless and none of them pointable. Each collects first, so
-none depends on anyone else having run:
+`launch(LaunchParams)` accepts name, symbol, quoteToken, creatorRecipient, buyAmount, and feeUse.
+A zero recipient defaults to the caller; zero buyAmount skips the initial buy; zero feeUse follows the
+registry default. Approve the launcher for quote spent on an initial buy. Send at least `launchFee()`;
+overpayments are retained. Existing deployment defaults use 0.00001 ETH.
 
-| | |
+## Fee collection and execution
+
+| Entry point | Behavior |
 | --- | --- |
-| `handleCreatorRewards(token)` | Spends the creator's 75% on whatever the launch chose |
-| `handleProtocolRewards(token)` | Converts the protocol's 25% to the pair asset and delivers it to the buyback |
-| `handleAllRewards(token)` | Both, in one transaction. What the frontend button calls |
+| `splitRewards(token)` / `splitRewards(token, mask)` | Collects selected positions and books both asset shares |
+| `spendCreatorShare(token)` | Sends booked creator fees to the selected fee use |
+| `convertProtocolShare(token)` | Converts booked protocol launch tokens to quote |
+| `sweepProtocol(assets)` | Sends booked quote assets to the configured buyback |
+| `deliverProtocolShare(token)` | Converts and sweeps the protocol share |
+| `handleCreatorRewards(token)` | Collects and spends creator fees |
+| `handleProtocolRewards(token)` | Collects and delivers protocol fees |
+| `handleAllRewards(token)` | Collects, spends creator fees, then attempts protocol delivery |
 
-Underneath are the primitives, for one step at a time: `splitRewards` (collect and book),
-`spendCreatorShare`, `convertProtocolShare`, `sweepProtocol`.
+All these entry points are permissionless with fixed destinations. Collection calls the external position
+manager and can fail on token restrictions; it does not execute a strategy or swap. Failed spending
+reverts atomically, preserving credits. Auto-LP returns unused assets and the locker rebooks them.
 
-**`splitRewards` can never fail.** It touches no pool, no swap and no third-party contract — it only moves
-numbers. Everything that can fail is downstream of it, so a broken fee use or an unfillable pool leaves the
-share booked and reachable rather than stranding it, and one creator's choice can never block another's
-fees or the protocol's.
+`handleAllRewards` catches failure of protocol delivery, but creator-strategy failure reverts the whole
+call. A successful receipt does not prove protocol delivery succeeded: inspect events and balances.
+Gas estimation can underfund its optional protocol leg. Standalone collection and creator-balance
+payouts remain available when a swap is unsafe.
 
-**Send `handleAllRewards` with a generous gas limit.** Its protocol half is wrapped in a `try` so a pool
-that cannot fill a sell does not stop a creator being paid — but that means the call succeeds whether or
-not the body runs, and gas estimation will settle on a limit that starves it.
+### Swap protection
 
-**The protocol's launch-token share is sold into the pool** by `convertProtocolShare`, so only the quote
-token ever reaches the buyback. No price bound: the caller does not choose the price and takes none of the
-output, so a bound could only make the call stuck. `spendRewards` runs it best-effort — if it fails the
-share stays in `protocolOwed` for a later call.
+Protocol conversions and creator buyback-and-burn use the pool plugin's 30-minute tick TWAP.
+Output must be at least 98% of the reference quote, including pool fees and price impact. The minimum
+is calculated on-chain and cannot be relaxed by the caller. Missing/short oracle history, malformed
+observations, dust with zero protected output, or an inadequate fill revert without consuming credits.
+A launch-token-only burn does not require a swap or oracle history.
 
-**The protocol side is pulled, not pushed.** `sweepProtocol` is a separate call because the buyback holds
-real tokens and a quote that can blocklist an address — a B20 equity, say — would otherwise make a
-transfer to it revert.
+This bounds adverse execution; it does not eliminate all MEV or sustained oracle manipulation.
+Large accumulated fees, a fast-moving price, or a pool fee near the limit may delay execution.
+There is no privileged bypass. The 30-minute/2% policy requires review before deployment.
+The initial creator buy is a separate atomic launch operation, not this fee-swap path.
 
-Launch pools are deliberately **not gauged**. A gauged Hydrex CL pool runs at `communityFee 1000/1000`,
-sending 100% of swap fees to the community vault and leaving the locked positions earning nothing.
-veHYDX voters are paid from the single Hydropump gauge instead.
+### Accounting and external fees
 
-## Fees
+Read `creatorOwed(token, asset)`, `protocolOwed(asset)`, `lifetimeFees(token)`, `getLaunch(token)`,
+`getPositions(token)`, and `fullMask(token)`. The split's scalar return values sum raw units of
+different assets and must not be displayed as USD volume.
 
-**The pool fee is dynamic.** Hydrex's plugin sets it per pool and moves it with volatility — the same launch
-pool has been observed charging anything from 0.005% to 1.5% within a day. There is no fixed rate to quote,
-and nothing here assumes one: every split below is a share of whatever was actually collected.
+The pool's dynamic trading fee and community-fee deduction are separate from the 75/25 locker split.
+Only fees reaching positions can be split. Setting communityFee to 1000/1000 redirects all new swap
+fees away from LP positions. Gauge creation and an administrative community-fee update are separate
+actions: operations must exclude launch pools from incompatible settings.
 
-Read it from `pool.plugin().getCurrentFee()` (hundredths of a bip). Do **not** read `globalState().lastFee`
-or the `fee` that QuoterV2 returns — both report a stale `500` on every Hydrex pool regardless of the real
-rate.
+CreatorBalance reads the current recipient each time. That recipient can call `setCreatorRecipient`;
+the original creator has no separate override. The registry owner can replace a strategy or repoint
+a launch. The buyback operator provides router calldata and a minimum HYDX output; the operator is
+trusted to choose those safely. `bribe()` sends held HYDX to the configured gauge bribe.
 
-Where a swap fee goes, in order:
+## Quote freshness
 
-1. Algebra skims `communityFee / 1000` of it into the pool's community vault, before the positions see
-   anything. Read it per pool from `globalState()`; launch pools inherit the factory's default at creation.
-2. What is left accrues to the locked positions, uncollected, until someone calls `collect`.
-3. `collect(token, positionMask)` pulls it into the locker and credits both shares — the creator's to
-   `creatorOwed[token][asset]`, the protocol's to `protocolOwed[asset]`. It transfers nothing out. Bit `i`
-   of the mask selects band `i`; `fullMask(token)` is all of them. The keeper `eth_call`s it with the full
-   mask to read per-band amounts, then sends a transaction covering only the bands worth the gas.
-4. `claim(token)` pays the creator. It collects first, so a creator never has to know whether their fees are
-   already credited or still sitting in the positions.
-5. `sweepProtocol(assets[])` moves the protocol share to the buyback, on the operator's schedule.
+The directory rejects launches when its price timestamp is older than one day, zero, or in the future.
+`isEnabled` includes freshness. Raw config and unchecked tick views remain readable when a quote expires.
+Refresh frequently enough to avoid gaps rather than scheduling exactly at the expiry boundary.
 
-Steps 4 and 5 are deliberately independent. Nothing is pushed to a third party during someone else's call,
-so a creator can claim at any time and the buyback job can run daily at its own convenience, and neither can
-block the other — a protocol fee recipient that cannot receive an asset never stops a creator being paid.
-`claimCredited(token)` skips the collect and pays only what is already credited, should `collect` itself ever
-revert.
+`build-quote-tokens.mjs` requires a usable API `updatedAt` for every included quote and rejects stale,
+future, or missing timestamps. The generated `priceObservedAt` is the oldest included observation.
+Registration checks this timestamp before broadcasting and calls
+`configureQuoteTokensWithTimestamp` or `setStartTicksWithTimestamp`, preserving it on-chain.
+Old generated files without this field must be regenerated.
 
-The split is stored, not hardcoded — `setFeeSplit` takes the two shares and only their ratio matters, so
-7500/2500 and 75/25 are the same thing. Changes apply to fees collected from then on; balances already
-credited are untouched.
+The API timestamp is only as trustworthy as the source's freshness semantics; a recently refreshed
+record does not independently prove a fresh underlying market observation. The owner remains a trusted
+price publisher. Legacy owner methods treat explicitly submitted ticks as observed at the transaction
+time; the supported file-registration flow uses the timestamped methods.
 
-For a frontend: `claimable(token)` is a plain view returning what is credited right now for both assets, and
-`claimableMany(tokens[])` does a creator's whole portfolio in one call. `totalOwed(token)` adds fees still
-sitting uncollected in the positions — it is not a view, because uncollected fees are only knowable by asking
-the position manager, so `eth_call` it; sent as a transaction it is just a full collect. `lifetimeFees(token)`
-is the gross a launch has ever collected, kept because claiming zeroes `creatorOwed` and nothing else in
-state survives to say what a launch has earned.
+B20 quote tokens have issuer-controlled transfer policies, pauses, and seizure capabilities.
+Standard forks use B20 mocks and cannot establish native precompile behavior. Wrapped equities must
+be priced per wrapped token. Listing decisions and callback/accounting hardening require separate review.
 
-The buyback converts what it receives into HYDX along routes built off-chain and passed as calldata to the
-Hydrex multi router, then `bribe()` deposits the HYDX into the Hydropump gauge. Routes are not restricted to
-one hop — a cycle converts many different assets at once and most of them want a multi-hop path. The job is
-operator-gated; output is verified as a HYDX balance delta, so a route that sends its output anywhere else
-fails its own `minHydxOut` bound. `bribe()` stays permissionless so HYDX cannot be stranded.
+## Development and checks
 
-## Develop
-
-```bash
-npm install && forge install
+```sh
+npm ci
 forge build
-forge test
-BASE_RPC_URL=https://mainnet.base.org forge test --match-path 'test/fork/*' -vv   # full launch on a fork
-forge fmt
+forge test --no-match-path 'test/fork/*'
+node --test test/QuoteSource.test.mjs
+BASE_RPC_URL=https://base.gateway.tenderly.co forge test --match-path 'test/fork/*'
 ```
 
-Both pair orderings are exercised throughout, because which one a launch gets is not something it chooses:
+Forks exercise live Base dependencies but deploy a fresh local Hydropump stack. No test broadcasts.
+Some suites use historical blocks, and the all-quotes suite internally omits native B20 assets.
+The audit regressions cover poisoned pools, expiry, adverse fee swaps, and retained credits.
 
-- `test/LaunchCurve.t.sol` seeds the curve both ways against a stand-in Algebra — the orientation is forced
-  by etching a quote near the top or the bottom of the address space — across five tick spacings, every
-  start tick the generator emits, and fuzzed over the whole configurable tick range.
-- `test/HydropumpLocker.t.sol` and `test/FeeUses.t.sol` each run their whole suite twice, the second time
-  with the launch token sorting above its quote, so nothing may quietly assume the pool's `amount0` is the
-  launch token.
-- `test/fork/FeeFlow.fork.t.sol` runs the full path against live Hydrex — real swaps, a real split, a real
-  conversion, and each of the three fee uses — in both orientations.
-- `test/fork/LaunchCurve.fork.t.sol` launches against **every** quote the generator emits and checks each
-  opens at the target valuation, whichever side it lands on.
+## Deployment and remediation
 
-## Live addresses (Base)
+See [audit remediation and deployment steps](docs/AUDIT_REMEDIATION.md) for the finding mapping,
+red/green evidence, upgrade sequence, and admin handover. A merged PR does not apply upgrades or
+accept ownership on-chain.
 
-| | |
+```sh
+npm run quotes:build
+npm run quotes:register:base
+npm run quotes:refresh:base
+```
+
+These registration commands publish transactions using the configured owner. Review the generated data
+before running them. Existing deploy scripts require the Safe to accept locker and registry ownership.
+
+## Recorded Base deployment addresses
+
+These are the existing deployment addresses, not evidence that this PR has been deployed.
+
+| Contract | Address |
 | --- | --- |
-| `PairDirectory` | `0x86F4Ff7b66De9fB8580DB4892c40514479828B6A` |
-| `HydropumpLauncher` | `0xB4209c5D03bA37f63e495d951EFc017f6332f5aE` |
-| `HydropumpLocker` | `0xe1137758d2168617cfa7C8103cbF935f5b1DB1E5` |
-| `FeeUseRegistry` | `0x665B8666693dC6154E3BAACBA739df66b29D300D` |
-| `CreatorBalanceFeeUse` | `0x51851B4ddc4457b5023b332B413dFFf8967a6fb9` |
-| `AutoLpFeeUse` | `0xB2bA61dF25e6D7DB73FaD75075ed8E92F0Eb0cfE` |
-| `BuybackBurnFeeUse` | `0xA1079f4B5A8f1568dc09CFC5E6e22d67cDDAcc14` |
-| `HydropumpBuyback` | `0xe3cD62d4dC36D0e751D1C4AC6a6Fc22d632e611a` |
-| `HydropumpRewardDistributor` | `0x24533D77817e65901003b79D0529eDA88098371d` |
+| PairDirectory | `0x86F4Ff7b66De9fB8580DB4892c40514479828B6A` |
+| HydropumpLauncher | `0xB4209c5D03bA37f63e495d951EFc017f6332f5aE` |
+| HydropumpLocker | `0xe1137758d2168617cfa7C8103cbF935f5b1DB1E5` |
+| FeeUseRegistry | `0x665B8666693dC6154E3BAACBA739df66b29D300D` |
+| HydropumpBuyback | `0xe3cD62d4dC36D0e751D1C4AC6a6Fc22d632e611a` |
+| HydropumpRewardDistributor | `0x24533D77817e65901003b79D0529eDA88098371d` |
 
-Deployed at block `51444026`. Indexed by `hydrex-dummy/0.2.0`.
-
-## Deploy
-
-Copy `.env.example` to `.env`, then:
-
-```bash
-npm run deploy:base
-```
-
-Two identities, nothing else to configure:
-
-|                   | Role                                                                                                                                                                                                                                                              |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEPLOYER_KEY`    | Also the operator. Owns the launcher, so it registers quote tokens and refreshes start ticks, and it runs the buyback job.                                                                                                                                        |
-| `HYDROPUMP_ADMIN` | The Safe. Upgrade authority on the launcher, the only role that can repoint the locker, set and sweep the launch fee, or reassign itself, and owner of the locker and buyback — the fee split, the protocol fee recipient, and the gauge bribe all sit behind it. |
-
-The split is deliberate: the hot key can do the daily work but cannot upgrade the launcher, repoint the
-locker, change the fee split, or move where protocol fees go. Repointing the locker would redirect every
-future launch's liquidity, so it sits with the Safe.
-
-The locker is deployed under the deployer so it can be wired to the launcher, then handed to the admin.
-That transfer is `Ownable2Step`, so accept it from the Safe afterwards.
-
-## Quote tokens
-
-```bash
-npm run quotes:build              # derive start ticks from api.hydrex.fi/assets -> script/quotes/quote-tokens.json
-npm run quotes:register:base      # configureQuoteTokens on the directory, for everything in that file (owner)
-npm run quotes:refresh:base       # setStartTicks only, for quotes already registered                  (owner)
-```
-
-The generator registers three groups — st0x equities (`wt*`), Coinbase equities (`*c`), and majors
-(WETH, cbBTC, USDC, USDT, cbETH, wstETH, EURC) — skipping anything unpriced, out of tick range, or already
-registered. A quote's address no longer constrains anything: HYDX sits at `0x00000e7e…`, low enough that no
-launch token can ever sort below it, and it is an ordinary quote because the curve mirrors onto the other
-side instead.
-
-Most equity quotes are **B20s** — Base's tokenized stocks, native precompiles at `0xb200…` addresses with
-no bytecode. They are ERC20 at the interface but the issuer can block an account or pause the token, and a
-blocked transfer _reverts_ rather than returning false. `approve` is not policy gated, so a successful
-approval proves nothing about the transfer that follows. Corporate actions move a redemption multiplier,
-never raw balances, so pool accounting is untouched. A launch itself never moves the quote token — only a dev buy does — and
-the credit-then-pull fee design above means a blocked recipient on either side stalls only its own payout.
-`test/fork/LaunchB20.fork.t.sol` covers all of it against a mock etched at the real AAPLc address, since a
-precompile cannot execute on a fork.
-
-## Gauge seed
-
-The Hydropump gauge hangs off a placeholder classic pair, so that bribing it pays veHYDX voters without any
-launch pool needing a gauge of its own.
-
-```bash
-npm run deploy:gauge-seed:base
-```
-
-Deploys `Hydropump One` and `Hydropump Two` — 18 decimals, fixed supply of 1 each, no mint path — pairs them
-as a volatile classic LP on the Hydrex pair factory, and seeds it with the entire supply of both. The
-deployer ends up with every LP token bar the burned minimum, so it can stake the lot once a gauge exists.
-
-### Addresses
-
-|                        |                                                                                             |
-| ---------------------- | ------------------------------------------------------------------------------------------- |
-| Hydropump One / Two    | `0x1129259595aE819F74F4D348D77904eB1bb8DadC` / `0xe7346c1326464d4110718ac09d3698623f8C91b0` |
-| vAMM-HPONE/HPTWO       | `0x2778CF77C7BE4Fc9c0dbBb2006c0c0e2807157F8`                                                |
-| Gauge                  | `0x7aDD6e6d16A42264F62d84412D182425cad443c4`                                                |
-| Bribe (buyback target) | `0xAb444e493d0e6E03d1ce9353956e0E4ad2ff1642`                                                |
-
-The buyback deposits into the **external** bribe — the one voters collect — not the internal LP-fee bribe.
-`test/fork/Buyback.fork.t.sol` runs `bribe()` against the live contract to prove the path works.
-
-```bash
-npm run stake:gauge:base
-```
-
-The full LP float is staked in the gauge, so its emissions accrue to the deployer.
+The Hydropump gauge uses a separate classic seed pair:
+`0x2778CF77C7BE4Fc9c0dbBb2006c0c0e2807157F8`.
+Gauge: `0x7aDD6e6d16A42264F62d84412D182425cad443c4`.
+External bribe: `0xAb444e493d0e6E03d1ce9353956e0E4ad2ff1642`.
+The operator stakes the seed LP and funds reward allocations; weekly rankings are not enforced by the distributor.

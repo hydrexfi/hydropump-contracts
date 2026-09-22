@@ -12,6 +12,7 @@ import {TickMath} from "../libraries/TickMath.sol";
 /// @notice Which tokens a launch may be quoted in, and what one launch token is worth in each of them.
 contract PairDirectory is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable, IPairDirectory {
     int24 public constant CURVE_SPAN = 887_200;
+    uint256 public constant MAX_PRICE_AGE = 1 days;
 
     /// @notice Upgrade authority, held apart from the owner that runs the daily refresh.
     address public admin;
@@ -31,6 +32,7 @@ contract PairDirectory is Initializable, Ownable2StepUpgradeable, UUPSUpgradeabl
     error LengthMismatch();
     error ZeroAddress();
     error NotAdmin();
+    error StalePrice();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -60,7 +62,7 @@ contract PairDirectory is Initializable, Ownable2StepUpgradeable, UUPSUpgradeabl
 
     function isEnabled(address quoteToken) external view returns (bool) {
         QuoteConfig memory quote = quoteTokens[quoteToken];
-        return quote.enabled && quote.updatedAt != 0;
+        return quote.enabled && _isFresh(quote.updatedAt);
     }
 
     /// @notice Whether a launch token sits on the token0 side of its pool. Algebra sorts by address and
@@ -76,11 +78,12 @@ contract PairDirectory is Initializable, Ownable2StepUpgradeable, UUPSUpgradeabl
         return launchIsToken0(token, quoteToken) ? startTick : -startTick;
     }
 
-    /// @notice `poolStartTick`, refusing a quote that is disabled or has never been priced.
+    /// @notice `poolStartTick`, refusing disabled, unpriced, expired or future-dated quotes.
     function requirePoolStartTick(address token, address quoteToken) external view returns (int24) {
         QuoteConfig memory quote = quoteTokens[quoteToken];
         if (!quote.enabled) revert QuoteTokenNotEnabled();
         if (quote.updatedAt == 0) revert StartTickUnset();
+        if (!_isFresh(quote.updatedAt)) revert StalePrice();
         return launchIsToken0(token, quoteToken) ? quote.startTick : -quote.startTick;
     }
 
@@ -103,6 +106,26 @@ contract PairDirectory is Initializable, Ownable2StepUpgradeable, UUPSUpgradeabl
         bool[] calldata enabledList,
         int24[] calldata startTickList
     ) external onlyOwner {
+        _configureQuoteTokens(quoteTokenList, enabledList, startTickList, uint64(block.timestamp));
+    }
+
+    /// @notice Register an off-chain batch without relabeling its observation as a new price.
+    function configureQuoteTokensWithTimestamp(
+        address[] calldata quoteTokenList,
+        bool[] calldata enabledList,
+        int24[] calldata startTickList,
+        uint64 observedAt
+    ) external onlyOwner {
+        if (!_isFresh(observedAt)) revert StalePrice();
+        _configureQuoteTokens(quoteTokenList, enabledList, startTickList, observedAt);
+    }
+
+    function _configureQuoteTokens(
+        address[] calldata quoteTokenList,
+        bool[] calldata enabledList,
+        int24[] calldata startTickList,
+        uint64 observedAt
+    ) internal {
         uint256 length = quoteTokenList.length;
         if (length != enabledList.length || length != startTickList.length) revert LengthMismatch();
 
@@ -112,13 +135,28 @@ contract PairDirectory is Initializable, Ownable2StepUpgradeable, UUPSUpgradeabl
             _validateStartTick(startTickList[i]);
 
             quoteTokens[quoteToken] =
-                QuoteConfig({enabled: enabledList[i], startTick: startTickList[i], updatedAt: uint64(block.timestamp)});
+                QuoteConfig({enabled: enabledList[i], startTick: startTickList[i], updatedAt: observedAt});
             emit QuoteTokenConfigured(quoteToken, enabledList[i], startTickList[i]);
         }
     }
 
     /// @notice The daily job: reprice quotes that are already registered.
     function setStartTicks(address[] calldata quoteTokenList, int24[] calldata startTickList) external onlyOwner {
+        _setStartTicks(quoteTokenList, startTickList, uint64(block.timestamp));
+    }
+
+    function setStartTicksWithTimestamp(
+        address[] calldata quoteTokenList,
+        int24[] calldata startTickList,
+        uint64 observedAt
+    ) external onlyOwner {
+        if (!_isFresh(observedAt)) revert StalePrice();
+        _setStartTicks(quoteTokenList, startTickList, observedAt);
+    }
+
+    function _setStartTicks(address[] calldata quoteTokenList, int24[] calldata startTickList, uint64 observedAt)
+        internal
+    {
         if (quoteTokenList.length != startTickList.length) revert LengthMismatch();
         for (uint256 i = 0; i < quoteTokenList.length; i++) {
             QuoteConfig storage quote = quoteTokens[quoteTokenList[i]];
@@ -127,7 +165,7 @@ contract PairDirectory is Initializable, Ownable2StepUpgradeable, UUPSUpgradeabl
 
             emit StartTickUpdated(quoteTokenList[i], quote.startTick, startTickList[i]);
             quote.startTick = startTickList[i];
-            quote.updatedAt = uint64(block.timestamp);
+            quote.updatedAt = observedAt;
         }
     }
 
@@ -146,6 +184,10 @@ contract PairDirectory is Initializable, Ownable2StepUpgradeable, UUPSUpgradeabl
     ///      values far outside the tick range, and -MIN_INT24 has no representation at all.
     function _validateStartTick(int24 startTick) internal pure {
         if (startTick < TickMath.MIN_TICK || startTick > TickMath.MAX_TICK) revert StartTickOutOfRange();
+    }
+
+    function _isFresh(uint64 timestamp) internal view returns (bool) {
+        return timestamp != 0 && timestamp <= block.timestamp && block.timestamp - timestamp <= MAX_PRICE_AGE;
     }
 
     function _authorizeUpgrade(address) internal override onlyAdmin {}

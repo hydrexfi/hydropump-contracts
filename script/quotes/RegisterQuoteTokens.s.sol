@@ -23,6 +23,10 @@ contract RegisterQuoteTokens is Script {
         bool refreshOnly = vm.envOr("REFRESH_ONLY", false);
 
         string memory json = vm.readFile("script/quotes/quote-tokens.json");
+        uint256 observed = vm.parseJsonUint(json, ".priceObservedAt");
+        require(observed != 0 && observed <= block.timestamp, "invalid price timestamp");
+        require(block.timestamp - observed <= 1 days, "quote file expired: regenerate");
+        uint64 observedAt = uint64(observed);
 
         address[] memory active = vm.parseJsonAddressArray(json, ".addresses");
         int256[] memory activeTicks = vm.parseJsonIntArray(json, ".startTicks");
@@ -45,7 +49,7 @@ contract RegisterQuoteTokens is Script {
             }
 
             vm.startBroadcast(ownerKey);
-            PairDirectory(directoryAddress).setStartTicks(active, ticks);
+            PairDirectory(directoryAddress).setStartTicksWithTimestamp(active, ticks, observedAt);
             vm.stopBroadcast();
 
             console2.log("Start ticks refreshed.");
@@ -70,7 +74,7 @@ contract RegisterQuoteTokens is Script {
         }
 
         vm.startBroadcast(ownerKey);
-        PairDirectory(directoryAddress).configureQuoteTokens(addresses, enabled, startTicks);
+        PairDirectory(directoryAddress).configureQuoteTokensWithTimestamp(addresses, enabled, startTicks, observedAt);
         vm.stopBroadcast();
 
         console2.log("Quote tokens registered.");

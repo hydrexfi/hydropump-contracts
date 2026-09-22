@@ -14,7 +14,7 @@ import {MockAlgebra, MockAlgebraPool} from "./mocks/MockAlgebra.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 /// @notice The launch curve seeded on either side of the pair, against a stand-in Algebra.
-/// @dev The launch token's address comes out of CREATE2 and cannot be chosen, so the orientation is forced
+/// @dev The launch token's address comes out of CREATE, so the orientation is forced
 ///      from the other end: a quote etched near the bottom of the address space can never be sorted below,
 ///      and one near the top can never be sorted above. Those two quotes are the whole fixture.
 ///
@@ -202,20 +202,10 @@ contract LaunchCurveTest is HydropumpFixture {
         }
     }
 
-    /// A pool opened before the launch, at a price the launcher did not choose, is the one way the bands can
-    /// end up on the wrong side of the price. `createAndInitializePoolIfNecessary` is a no-op against an
-    /// existing pool, so the curve would be seeded against someone else's price.
-    ///
-    /// It fails closed. Every band is minted with zero desired on the quote side, so a band that needs quote
-    /// is a zero-liquidity position, which the position manager rejects. The launch reverts and the
-    /// creator's quote is never touched.
-    ///
-    /// Largely theoretical now: an address comes out of `CREATE` and is not knowable until the launch has
-    /// already happened, so there is no window in which to front-run one. Kept because the failure mode is
-    /// what matters — whatever puts a pool at the wrong price, the launcher must not fund it.
-    function test_APoolOpenedBeforeTheLaunchMakesItRevertWithoutTouchingTheQuote() public {
-        // The next `CREATE` from the launcher proxy. Not something a real attacker can compute — which is
-        // the point of the note below — but a test has to be able to set the scenario up.
+    /// An attacker can initialize a predicted pool. The launcher skips it before supplying liquidity
+    /// or executing the creator's buy.
+    function test_APoolOpenedBeforeTheLaunchIsSkippedBeforeDevBuy() public {
+        // CREATE addresses are publicly predictable from the launcher nonce.
         address predicted = vm.computeCreateAddress(address(launcher), vm.getNonce(address(launcher)));
 
         (address token0, address token1) = predicted < HIGH_QUOTE ? (predicted, HIGH_QUOTE) : (HIGH_QUOTE, predicted);
@@ -225,8 +215,7 @@ contract LaunchCurveTest is HydropumpFixture {
         MockERC20(HIGH_QUOTE).mint(creator, buyAmount);
         vm.startPrank(creator);
         IERC20(HIGH_QUOTE).approve(address(launcher), buyAmount);
-        vm.expectRevert(MockAlgebra.ZeroLiquidity.selector);
-        launcher.launch{value: LAUNCH_FEE}(
+        (address token,,) = launcher.launch{value: LAUNCH_FEE}(
             HydropumpLauncher.LaunchParams({
                 name: "Alpha",
                 symbol: "ALPHA",
@@ -238,7 +227,9 @@ contract LaunchCurveTest is HydropumpFixture {
         );
         vm.stopPrank();
 
-        assertEq(IERC20(HIGH_QUOTE).balanceOf(creator), buyAmount, "the creator keeps their quote");
+        assertTrue(token != predicted);
+        assertGt(IERC20(token).balanceOf(creator), 0, "dev buy executes in the clean pool");
+        assertEq(IERC20(predicted).totalSupply(), 0);
     }
 
     /// `QuoteConsumed` cannot fire through the position manager — every mint passes zero on the quote side,
