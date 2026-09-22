@@ -75,7 +75,7 @@ contracts/
   decrease-liquidity path.
 - **Dev buy** set `buyAmount` to spend that much quote token buying the launch token in the same
   transaction, sent to the caller. `0` skips it. Approve the launcher for the quote token first.
-- **Launch fee** at least `launchFee()` (0.00001 ETH) sent as `msg.value`, purely to make spamming launches
+- **Launch fee** at least `launchFee()` (0.0005 ETH) sent as `msg.value`, purely to make spamming launches
   cost something. Overpayment is kept, not refunded. The ETH sits in the launcher until the admin sweeps it
   with `claimLaunchFees`.
 

@@ -34,7 +34,7 @@ import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.s
 contract DeployHydropump is Script {
     uint64 internal constant CREATOR_FEE = 7_500; // 75%, to whatever the launch's fee use spends it on
     uint64 internal constant PROTOCOL_FEE = 2_500; // 25%, converted to the quote and held for the buyback
-    uint96 internal constant LAUNCH_FEE = 0.00001 ether; // anti-spam, claimable by the admin
+    uint96 internal constant LAUNCH_FEE = 0.0005 ether; // anti-spam, claimable by the admin
 
     function run() public {
         uint256 deployerKey = vm.envUint("DEPLOYER_KEY");
