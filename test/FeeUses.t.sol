@@ -217,19 +217,62 @@ contract FeeUsesTest is HydropumpFixture {
     //  BUYBACK AND BURN
     // =============================
 
+    function test_OnlyCreatorCanTriggerBuyback() public {
+        (address token,) = _launchWithFees(FeeUses.BUYBACK_BURN, 40_000e18, 1e18);
+        uint256 credit = locker.creatorOwed(token, _quote());
+
+        vm.prank(creator);
+        locker.setCreatorRecipient(token, stranger);
+
+        vm.prank(stranger);
+        vm.expectRevert(HydropumpLocker.NotLaunchCreator.selector);
+        locker.spendCreatorShare(token);
+        assertEq(locker.creatorOwed(token, _quote()), credit);
+
+        vm.prank(stranger);
+        vm.expectRevert(HydropumpLocker.NotLaunchCreator.selector);
+        locker.handleCreatorRewards(token);
+        assertEq(locker.creatorOwed(token, _quote()), credit);
+
+        vm.prank(stranger);
+        vm.expectRevert(HydropumpLocker.NotLaunchCreator.selector);
+        locker.handleAllRewards(token);
+        assertEq(locker.creatorOwed(token, _quote()), credit);
+
+        vm.prank(creator);
+        locker.spendCreatorShare(token);
+        assertGt(buybackBurn.lifetimeBurned(token), 0);
+    }
+
+    function test_DefaultBuybackIsCreatorOnly() public {
+        vm.prank(owner);
+        registry.setDefaultFeeUse(FeeUses.BUYBACK_BURN);
+        (address token,,) = _launch(_quote());
+        _accrueFees(token, 40_000e18, 0);
+        locker.splitRewards(token);
+
+        vm.prank(stranger);
+        vm.expectRevert(HydropumpLocker.NotLaunchCreator.selector);
+        locker.spendCreatorShare(token);
+
+        vm.prank(creator);
+        locker.spendCreatorShare(token);
+        assertEq(buybackBurn.lifetimeBurned(token), 30_000e18);
+    }
+
     /// The quote side buys the launch token in its own pool and the lot is destroyed. Supply only falls.
     function test_BuybackBurnBuysWithTheQuoteAndBurnsEverything() public {
         (address token,) = _launchWithFees(FeeUses.BUYBACK_BURN, 40_000e18, 1e18);
 
         uint256 supplyBefore = IERC20(token).totalSupply();
 
-        vm.prank(stranger);
+        vm.prank(creator);
         locker.spendCreatorShare(token);
 
         uint256 burned = buybackBurn.lifetimeBurned(token);
         assertGt(burned, 30_000e18, "the launch-token fees plus whatever the quote bought");
         assertEq(IERC20(token).totalSupply(), supplyBefore - burned, "supply actually fell");
-        assertEq(IERC20(token).balanceOf(stranger), 0, "and the caller takes nothing");
+        assertEq(IERC20(token).balanceOf(creator), 0, "and the creator takes nothing");
         _assertNothingHeld(address(buybackBurn), token);
     }
 
@@ -237,6 +280,7 @@ contract FeeUsesTest is HydropumpFixture {
         (address token,) = _launchWithFees(FeeUses.BUYBACK_BURN, 40_000e18, 0);
 
         uint256 supplyBefore = IERC20(token).totalSupply();
+        vm.prank(creator);
         locker.spendCreatorShare(token);
 
         assertEq(buybackBurn.lifetimeBurned(token), 30_000e18, "no quote to spend, so it is just the burn");
@@ -253,6 +297,7 @@ contract FeeUsesTest is HydropumpFixture {
         MockAlgebraPool(pool).setPrice(TickMath.getSqrtRatioAtTick(shoved));
 
         uint256 supplyBefore = IERC20(token).totalSupply();
+        vm.prank(creator);
         locker.spendCreatorShare(token);
         assertGt(buybackBurn.lifetimeBurned(token), 0);
         assertLt(IERC20(token).totalSupply(), supplyBefore);
@@ -331,8 +376,9 @@ contract FeeUsesTest is HydropumpFixture {
         vm.startPrank(stranger);
         locker.handleAllRewards(paid);
         locker.handleAllRewards(pooled);
-        locker.handleAllRewards(burned);
         vm.stopPrank();
+        vm.prank(creator);
+        locker.handleAllRewards(burned);
 
         assertEq(IERC20(paid).balanceOf(creator), 30_000e18, "one paid its creator");
         assertGt(npm.liquidityOf(pooledPosition), pooledLiquidityBefore, "one grew its own curve");
@@ -360,6 +406,7 @@ contract FeeUsesTest is HydropumpFixture {
 
         locker.handleAllRewards(paid);
         locker.handleAllRewards(pooled);
+        vm.prank(creator);
         locker.handleAllRewards(burned);
 
         assertEq(IERC20(paid).balanceOf(creator), 30_000e18);

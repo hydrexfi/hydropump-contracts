@@ -81,8 +81,9 @@ contracts/
 
 ### Where the fees go
 
-Three entry points on the locker, all permissionless and none of them pointable. Each collects first, so
-none depends on anyone else having run:
+Three entry points on the locker collect fees before spending them. The creator must call
+`handleCreatorRewards` or `handleAllRewards` when the launch uses buyback-and-burn; the other
+fee uses and the protocol path remain permissionless:
 
 | | |
 | --- | --- |
@@ -92,6 +93,8 @@ none depends on anyone else having run:
 
 Underneath are the primitives, for one step at a time: `splitRewards` (collect and book),
 `spendCreatorShare`, `convertProtocolShare`, `sweepProtocol`.
+Direct `spendCreatorShare` calls also require the original launch creator for buyback-and-burn,
+even if the creator recipient has changed.
 
 **`splitRewards` can never fail.** It touches no pool, no swap and no third-party contract — it only moves
 numbers. Everything that can fail is downstream of it, so a broken fee use or an unfillable pool leaves the
