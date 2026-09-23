@@ -142,8 +142,8 @@ contract FeeFlowForkTest is ForkFixture {
         assertEq(liquidityAfter, liquidityBefore + added);
         assertEq(NPM.ownerOf(positionId), address(locker), "and the position never moved");
         assertEq(IERC20(token).balanceOf(bob), 0, "the caller took nothing");
-        assertEq(IERC20(token).balanceOf(address(autoLp)), 0, "and the remainder was forwarded, not held");
-        assertEq(IERC20(WETH).balanceOf(address(autoLp)), 0);
+        assertEq(IERC20(token).balanceOf(address(autoLp)), 0, "leftover tokens were burned");
+        assertEq(IERC20(WETH).balanceOf(address(autoLp)), autoLp.quoteCarry(token));
 
         console2.log("auto-LP liquidity added", added);
     }

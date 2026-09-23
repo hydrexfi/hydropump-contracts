@@ -32,6 +32,21 @@ interface INonfungiblePositionManager {
         uint128 amount1Max;
     }
 
+    struct DecreaseLiquidityParams {
+        uint256 tokenId;
+        uint128 liquidity;
+        uint256 amount0Min;
+        uint256 amount1Min;
+        uint256 deadline;
+    }
+
+    function decreaseLiquidity(DecreaseLiquidityParams calldata params)
+        external
+        payable
+        returns (uint256 amount0, uint256 amount1);
+
+    function burn(uint256 tokenId) external payable;
+
     function mint(MintParams calldata params)
         external
         payable
