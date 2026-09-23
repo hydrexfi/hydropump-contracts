@@ -3,28 +3,26 @@ pragma solidity 0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IFeeUse} from "../interfaces/IFeeUse.sol";
 import {IHydropumpLocker} from "../interfaces/IHydropumpLocker.sol";
 import {IAlgebraPool} from "../interfaces/IAlgebraPool.sol";
 import {INonfungiblePositionManager} from "../interfaces/INonfungiblePositionManager.sol";
 import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
+import {TickMath} from "../libraries/TickMath.sol";
 
-/// @title AutoLpFeeUse
-/// @notice Puts a launch's fees back into its own curve, permanently.
-/// @dev `increaseLiquidity` is not owner-gated on Algebra, so this can grow a band the locker holds
-///      without the locker parting with it. The position has no withdraw path, so it is one-way.
-///
-///      A band takes one ratio, so a remainder happens on nearly every call. It goes back to the locker
-///      rather than sitting here — as does the whole amount when no deposit is possible at all, which is
-///      what keeps one-sided fees from reverting the caller's entire transaction.
-contract AutoLpFeeUse is IFeeUse {
+/// @notice Compounds fees into the original locked curve and returns unused assets to the locker.
+/// @dev The locker rebooks both remainders per launch. Later permissionless calls can retry them,
+///      together with new fees, when the pool ratio permits. No tokens are burned and no new position
+///      is created. Execution uses spot without an oracle or MEV protection.
+contract AutoLpFeeUse is IFeeUse, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     INonfungiblePositionManager public constant nonfungiblePositionManager =
         INonfungiblePositionManager(HydropumpAddresses.NONFUNGIBLE_POSITION_MANAGER);
-
     IHydropumpLocker public immutable locker;
+    uint256 private constant Q96 = 1 << 96;
 
     mapping(address token => uint128 liquidity) public lifetimeLiquidityAdded;
 
@@ -36,115 +34,84 @@ contract AutoLpFeeUse is IFeeUse {
     error NotLocker();
     error UnknownLaunch();
     error ZeroAddress();
+    error InvalidAssets();
 
     constructor(address _locker) {
         if (_locker == address(0)) revert ZeroAddress();
         locker = IHydropumpLocker(_locker);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                                 READ
-    //////////////////////////////////////////////////////////////*/
-
-    /// @notice The band to deposit into: the one holding the current price, or failing that the nearest.
-    /// @dev A straddling band takes both sides, so it is the first choice — but the price is not always
-    ///      inside one (a token1 launch opens on band 0's edge, and a run-out launch sits past the tail).
+    /// @notice Existing launch band containing spot, or the closest band when spot lies outside all bands.
     function targetBand(address token) public view returns (uint256 positionId, bool found) {
-        (positionId, found,,) = _targetBand(token);
-    }
-
-    /// @dev Also reports where the band sits relative to the price, which decides which sides it can take.
-    function _targetBand(address token)
-        internal
-        view
-        returns (uint256 positionId, bool found, bool needs0, bool needs1)
-    {
         address pool = locker.poolOf(token);
         if (pool == address(0)) revert UnknownLaunch();
         (, int24 tick,,,,) = IAlgebraPool(pool).globalState();
-
-        uint256[] memory positionIds = locker.getPositions(token);
+        uint256[] memory ids = locker.getPositions(token);
         uint256 bestDistance = type(uint256).max;
-        int24 bestLower;
-        int24 bestUpper;
-
-        for (uint256 i = 0; i < positionIds.length; i++) {
-            (,,,,, int24 lower, int24 upper,,,,,) = nonfungiblePositionManager.positions(positionIds[i]);
-            // A band holding the price takes both sides, and is always the first choice.
-            if (tick >= lower && tick < upper) return (positionIds[i], true, true, true);
-
-            uint256 distance = tick < lower ? uint256(int256(lower - tick)) : uint256(int256(tick - upper));
+        for (uint256 i; i < ids.length; i++) {
+            (,,,,, int24 lower, int24 upper,,,,,) = nonfungiblePositionManager.positions(ids[i]);
+            if (tick >= lower && tick < upper) return (ids[i], true);
+            uint256 distance = tick < lower ? uint256(int256(lower) - tick) : uint256(int256(tick) - upper);
             if (distance < bestDistance) {
                 bestDistance = distance;
-                positionId = positionIds[i];
+                positionId = ids[i];
                 found = true;
-                (bestLower, bestUpper) = (lower, upper);
             }
         }
-
-        // A band entirely above the price is pure token0; one entirely below is pure token1.
-        if (found) (needs0, needs1) = tick < bestLower ? (true, false) : (false, true);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                              USER WRITE
-    //////////////////////////////////////////////////////////////*/
-
-    function onFees(address token, address[] calldata assets, uint256[] calldata amounts) external {
+    function onFees(address token, address[] calldata assets, uint256[] calldata amounts) external nonReentrant {
         if (msg.sender != address(locker)) revert NotLocker();
-
-        address quoteToken = locker.quoteTokenOf(token);
-        (address token0, address token1) = token < quoteToken ? (token, quoteToken) : (quoteToken, token);
-
-        // Whatever arrived, expressed as the pool's two sides.
-        uint256 amount0;
-        uint256 amount1;
-        for (uint256 i = 0; i < assets.length; i++) {
-            if (assets[i] == token0) amount0 += amounts[i];
-            else if (assets[i] == token1) amount1 += amounts[i];
+        address quote = locker.quoteTokenOf(token);
+        if (assets.length != 2 || amounts.length != 2 || assets[0] != token || assets[1] != quote) {
+            revert InvalidAssets();
         }
+        (uint256 tokenLeft, uint256 quoteLeft) = _compound(token, quote, amounts[0], amounts[1]);
+        _returnToLocker(token, token, tokenLeft);
+        _returnToLocker(token, quote, quoteLeft);
+    }
 
-        // A deposit needs every side the band is able to take: Algebra sizes liquidity by the smaller of
-        // the two, so a straddling band offered only one side computes zero and reverts
-        // (`zeroLiquidityDesired`). Checked rather than caught, so the outcome does not depend on how
-        // much gas the caller happened to send.
-        (uint256 positionId, bool found, bool needs0, bool needs1) = _targetBand(token);
-        if (!found || (needs0 && amount0 == 0) || (needs1 && amount1 == 0)) {
-            _returnToLocker(token, token0, amount0);
-            _returnToLocker(token, token1, amount1);
-            return;
-        }
-
-        IERC20(token0).forceApprove(address(nonfungiblePositionManager), amount0);
-        IERC20(token1).forceApprove(address(nonfungiblePositionManager), amount1);
-
-        (uint128 liquidity, uint256 used0, uint256 used1) = nonfungiblePositionManager.increaseLiquidity(
-            INonfungiblePositionManager.IncreaseLiquidityParams({
-                tokenId: positionId,
-                amount0Desired: amount0,
-                amount1Desired: amount1,
-                // No price to be protected from: this deposits rather than buys, so an adverse price
-                // only changes how the two sides pair off.
-                amount0Min: 0,
-                amount1Min: 0,
-                deadline: block.timestamp
-            })
+    function _compound(address token, address quote, uint256 tokenAmount, uint256 quoteAmount)
+        internal
+        returns (uint256 tokenLeft, uint256 quoteLeft)
+    {
+        (uint256 id, bool found) = targetBand(token);
+        if (!found) return (tokenAmount, quoteAmount);
+        bool tokenIs0 = token < quote;
+        (uint256 amount0, uint256 amount1) = tokenIs0 ? (tokenAmount, quoteAmount) : (quoteAmount, tokenAmount);
+        (,,,,, int24 lower, int24 upper,,,,,) = nonfungiblePositionManager.positions(id);
+        (uint160 price,,,,,) = IAlgebraPool(locker.poolOf(token)).globalState();
+        // Check actual liquidity math, including rounding to zero and exact range boundaries.
+        // Retain dust rather than allowing a zero-liquidity deposit to revert the whole route.
+        if (_liquidity(price, lower, upper, amount0, amount1) == 0) return (tokenAmount, quoteAmount);
+        IERC20(token).forceApprove(address(nonfungiblePositionManager), tokenAmount);
+        IERC20(quote).forceApprove(address(nonfungiblePositionManager), quoteAmount);
+        (uint128 added, uint256 used0, uint256 used1) = nonfungiblePositionManager.increaseLiquidity(
+            INonfungiblePositionManager.IncreaseLiquidityParams(id, amount0, amount1, 0, 0, block.timestamp)
         );
-
-        IERC20(token0).forceApprove(address(nonfungiblePositionManager), 0);
-        IERC20(token1).forceApprove(address(nonfungiblePositionManager), 0);
-
-        lifetimeLiquidityAdded[token] += liquidity;
-        emit LiquidityAdded(token, positionId, liquidity, used0, used1);
-
-        _returnToLocker(token, token0, amount0 - used0);
-        _returnToLocker(token, token1, amount1 - used1);
+        IERC20(token).forceApprove(address(nonfungiblePositionManager), 0);
+        IERC20(quote).forceApprove(address(nonfungiblePositionManager), 0);
+        lifetimeLiquidityAdded[token] += added;
+        emit LiquidityAdded(token, id, added, used0, used1);
+        return tokenIs0 ? (amount0 - used0, amount1 - used1) : (amount1 - used1, amount0 - used0);
     }
 
     function _returnToLocker(address token, address asset, uint256 amount) internal {
         if (amount == 0) return;
-
         IERC20(asset).safeTransfer(address(locker), amount);
         emit RemainderReturned(token, asset, amount);
+    }
+
+    function _liquidity(uint160 price, int24 lower, int24 upper, uint256 amount0, uint256 amount1)
+        internal
+        pure
+        returns (uint256)
+    {
+        uint160 a = TickMath.getSqrtRatioAtTick(lower);
+        uint160 b = TickMath.getSqrtRatioAtTick(upper);
+        if (price <= a) return Math.mulDiv(amount0, Math.mulDiv(a, b, Q96), b - a);
+        if (price >= b) return Math.mulDiv(amount1, Q96, b - a);
+        return
+            Math.min(Math.mulDiv(amount0, Math.mulDiv(price, b, Q96), b - price), Math.mulDiv(amount1, Q96, price - a));
     }
 }

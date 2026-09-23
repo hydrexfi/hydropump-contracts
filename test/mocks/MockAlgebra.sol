@@ -95,6 +95,14 @@ contract MockAlgebra {
     mapping(bytes32 pair => address) public pools;
     mapping(uint256 id => Position) internal _positions;
 
+    // Optional caps simulate a ratio-limited partial fill. Real liquidity math is covered on fork.
+    uint256 public usageCap0;
+    uint256 public usageCap1;
+
+    function setUsageCaps(uint256 cap0, uint256 cap1) external {
+        (usageCap0, usageCap1) = (cap0, cap1);
+    }
+
     /// @notice Extra amounts `mint` reports as consumed, so the launcher's own `QuoteConsumed` assertion
     ///         can be exercised. Zero everywhere except the test that pokes at it.
     uint256 public phantom0;
@@ -198,6 +206,9 @@ contract MockAlgebra {
         amount1 = needs1 ? params.amount1Desired : 0;
         if (amount0 == 0 && amount1 == 0) revert ZeroLiquidity();
 
+        if (usageCap0 != 0 && amount0 > usageCap0) amount0 = usageCap0;
+        if (usageCap1 != 0 && amount1 > usageCap1) amount1 = usageCap1;
+
         if (amount0 > 0) IERC20(position.token0).transferFrom(msg.sender, pool, amount0);
         if (amount1 > 0) IERC20(position.token1).transferFrom(msg.sender, pool, amount1);
 
@@ -299,7 +310,10 @@ contract MockSwapRouter {
         (feePips, bump) = (_feePips, _bump);
     }
 
-    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params) external returns (uint256 amountOut) {
+    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params)
+        external
+        returns (uint256 amountOut)
+    {
         (address token0, address token1) =
             params.tokenIn < params.tokenOut ? (params.tokenIn, params.tokenOut) : (params.tokenOut, params.tokenIn);
 

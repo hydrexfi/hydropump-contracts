@@ -65,7 +65,9 @@ abstract contract ForkFixture is Test {
     function setUp() public virtual {
         string memory rpc = vm.envOr("BASE_RPC_URL", string(""));
         if (bytes(rpc).length == 0) return;
-        vm.createSelectFork(rpc);
+        uint256 forkBlock = vm.envOr("BASE_FORK_BLOCK", uint256(0));
+        if (forkBlock == 0) vm.createSelectFork(rpc);
+        else vm.createSelectFork(rpc, forkBlock);
         forked = true;
 
         directory = PairDirectory(
