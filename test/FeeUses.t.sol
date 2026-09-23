@@ -15,7 +15,10 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {TickMath} from "../contracts/libraries/TickMath.sol";
 
 /// @notice What a launch's creator share can be spent on: a payout, more liquidity, or a burn.
-/// @dev Routes spend the fees in one call. Auto-LP may retain per-launch quote dust for a later deposit.
+/// @dev The through-line of every case below is that routing is the whole thing. A fee use spends what it
+///      is handed inside the same call and keeps nothing, so `escrow.route` — or `locker.handleAllRewards`,
+///      which wraps it — is the only step, and a balance sitting in one of these contracts afterwards is
+///      a bug rather than a state to claim from.
 ///
 ///      Run twice: `FeeUsesMirroredTest` at the bottom repeats every case with the launch token sorting
 ///      above its quote. Two of the three strategies swap or deposit into the pool, and both care which
@@ -37,14 +40,10 @@ contract FeeUsesTest is HydropumpFixture {
         locker.splitRewards(token);
     }
 
-    /// @dev In these single-Auto-LP-launch cases, only explicitly attributed quote carry may remain.
+    /// @dev Nothing may be left behind in a fee use. Asserted after every case that spends.
     function _assertNothingHeld(address feeUse, address token) internal view {
         assertEq(IERC20(token).balanceOf(feeUse), 0, "fee use held launch tokens");
-        assertEq(
-            IERC20(_quote()).balanceOf(feeUse),
-            feeUse == address(autoLp) ? autoLp.quoteCarry(token) : 0,
-            "fee use held unattributed quote"
-        );
+        assertEq(IERC20(_quote()).balanceOf(feeUse), 0, "fee use held quote");
     }
 
     // =============================
@@ -149,8 +148,9 @@ contract FeeUsesTest is HydropumpFixture {
         assertTrue(pool != address(0));
     }
 
-    /// Remainders never pay the creator: token is burned and quote funds the supplemental position.
-    function test_AutoLpRemaindersDoNotPayTheCreator() public {
+    /// A band takes one ratio, so something is nearly always left over. It goes back to the locker rather
+    /// than out to the creator — this contract is a route, and it keeps nothing.
+    function test_AutoLpReturnsWhatDidNotPairOff() public {
         (address token,) = _launchWithFees(FeeUses.AUTO_LP, 40_000e18, 1e18);
 
         locker.spendCreatorShare(token);
@@ -160,7 +160,9 @@ contract FeeUsesTest is HydropumpFixture {
         assertEq(IERC20(_quote()).balanceOf(creator), 0);
     }
 
-    /// One-sided fees either compound where usable or follow the remainder route without reverting.
+    /// One-sided fees used to revert the whole call: a band holding the price sizes liquidity by the
+    /// smaller side, so a zero on one side means zero liquidity and `zeroLiquidityDesired`. Whatever
+    /// cannot be deposited now goes back to the locker instead.
     function test_AutoLpSurvivesOneSidedFees() public {
         (address token,) = _launchWithFees(FeeUses.AUTO_LP, 40_000e18, 0);
 
@@ -168,14 +170,16 @@ contract FeeUsesTest is HydropumpFixture {
 
         locker.spendCreatorShare(token); // must not revert
 
-        // Only creator fees leave the locker; the protocol share stays booked.
+        // Deposited or returned, nothing is lost and nothing is kept: the locker is down only by what
+        // the band actually took.
         uint256 spentIntoTheBand = lockerBefore - IERC20(token).balanceOf(address(locker));
         assertLe(spentIntoTheBand, 30_000e18, "it can never spend more than the creator share");
         assertEq(IERC20(token).balanceOf(creator), 0, "and the creator is not paid by auto-LP");
         _assertNothingHeld(address(autoLp), token);
     }
 
-    /// One-sided creator fees must not prevent the protocol share being handled.
+    /// And the one-click path survives it, which is the point: a launch on auto-LP must still be able to
+    /// pay the protocol its share.
     function test_HandleAllRewardsSurvivesAnUndepositableAutoLp() public {
         (address token,,) = _launch(_quote(), FeeUses.AUTO_LP, 0);
         _accrueFees(token, 40_000e18, 0);
@@ -183,7 +187,8 @@ contract FeeUsesTest is HydropumpFixture {
 
         locker.handleAllRewards(token);
 
-        // Token fees are compounded or burned. The protocol is paid independently.
+        // Whatever the band could not take is re-booked rather than lost, and nothing sticks in the
+        // fee use. The protocol is paid either way.
         _assertNothingHeld(address(autoLp), token);
         assertGt(locker.protocolOwed(_quote()) + IERC20(_quote()).balanceOf(buyback), 0, "protocol paid");
     }
@@ -333,7 +338,8 @@ contract FeeUsesTest is HydropumpFixture {
         assertGt(npm.liquidityOf(pooledPosition), pooledLiquidityBefore, "one grew its own curve");
         assertLt(IERC20(burned).totalSupply(), burnedSupplyBefore, "one destroyed supply");
 
-        // Only attributed quote carry may remain; no protocol launch-token share needs conversion.
+        // Nothing left in a fee use and no launch-token share still needing a pool to convert against.
+        // `creatorOwed` may be non-zero afterwards: auto-LP re-books whatever a band could not take.
         for (uint256 i = 0; i < 3; i++) {
             address token = [paid, pooled, burned][i];
             assertEq(locker.protocolOwed(token), 0, "protocol share left unconverted");
@@ -361,14 +367,15 @@ contract FeeUsesTest is HydropumpFixture {
         assertEq(IERC20(pooled).balanceOf(creator) + IERC20(burned).balanceOf(creator), 0, "no crossed wires");
     }
 
-    /// A launch outside its original bands can still compound and process its remainder.
+    /// A launch whose price has run past every band still goes through. The deposit takes what it can and
+    /// the rest comes back, so no strategy can leave the button stuck on a pool that moved.
     function test_HandleAllRewardsSurvivesAPriceOutsideEveryBand() public {
         (address token, address pool) = _launchWithFees(FeeUses.AUTO_LP, 40_000e18, 1e18);
         _setSpot(pool, _currentTick(pool) + (token < _quote() ? int24(-200_000) : int24(200_000)));
 
         locker.handleAllRewards(token);
 
-        // Any retained quote is explicitly attributed to this launch.
+        // Deposited or re-booked, never stranded: the fee use keeps nothing either way.
         _assertNothingHeld(address(autoLp), token);
     }
 

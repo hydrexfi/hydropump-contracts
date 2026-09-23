@@ -94,10 +94,8 @@ contract MockAlgebra {
     uint256 public nextId = 1;
     mapping(bytes32 pair => address) public pools;
     mapping(uint256 id => Position) internal _positions;
-    mapping(uint256 id => uint256) public principal0;
-    mapping(uint256 id => uint256) public principal1;
 
-    // Optional per-side caps for testing a deposit that cannot consume all offered fees.
+    // Optional caps simulate a ratio-limited partial fill. Real liquidity math is covered on fork.
     uint256 public usageCap0;
     uint256 public usageCap1;
 
@@ -176,11 +174,9 @@ contract MockAlgebra {
         amount1 += phantom1;
 
         // Not the real curve math, only something positive and monotone in the deposit.
-        liquidity = uint128(Math.max(1, (amount0 + amount1) >> 32));
+        liquidity = uint128((amount0 + amount1) >> 32);
 
         tokenId = nextId++;
-        principal0[tokenId] = amount0;
-        principal1[tokenId] = amount1;
         _positions[tokenId] = Position({
             token0: params.token0,
             token1: params.token1,
@@ -208,44 +204,16 @@ contract MockAlgebra {
 
         amount0 = needs0 ? params.amount0Desired : 0;
         amount1 = needs1 ? params.amount1Desired : 0;
+        if (amount0 == 0 && amount1 == 0) revert ZeroLiquidity();
+
         if (usageCap0 != 0 && amount0 > usageCap0) amount0 = usageCap0;
         if (usageCap1 != 0 && amount1 > usageCap1) amount1 = usageCap1;
-        if (amount0 == 0 && amount1 == 0) revert ZeroLiquidity();
 
         if (amount0 > 0) IERC20(position.token0).transferFrom(msg.sender, pool, amount0);
         if (amount1 > 0) IERC20(position.token1).transferFrom(msg.sender, pool, amount1);
 
-        liquidity = uint128(Math.max(1, (amount0 + amount1) >> 32));
+        liquidity = uint128((amount0 + amount1) >> 32);
         position.liquidity += liquidity;
-        principal0[params.tokenId] += amount0;
-        principal1[params.tokenId] += amount1;
-    }
-
-    /// @dev Principal is static in this mock. Real swap-driven inventory changes are covered on fork.
-    function decreaseLiquidity(INonfungiblePositionManager.DecreaseLiquidityParams calldata params)
-        external
-        returns (uint256 amount0, uint256 amount1)
-    {
-        Position storage p = _positions[params.tokenId];
-        require(msg.sender == p.owner, "not owner");
-        require(params.liquidity != 0 && params.liquidity <= p.liquidity, "bad liquidity");
-        amount0 = Math.mulDiv(principal0[params.tokenId], params.liquidity, p.liquidity);
-        amount1 = Math.mulDiv(principal1[params.tokenId], params.liquidity, p.liquidity);
-        principal0[params.tokenId] -= amount0;
-        principal1[params.tokenId] -= amount1;
-        p.liquidity -= params.liquidity;
-        p.owed0 += uint128(amount0);
-        p.owed1 += uint128(amount1);
-        address pool = poolFor(p.token0, p.token1);
-        if (amount0 != 0) MockAlgebraPool(pool).pay(p.token0, address(this), amount0);
-        if (amount1 != 0) MockAlgebraPool(pool).pay(p.token1, address(this), amount1);
-    }
-
-    function burn(uint256 id) external {
-        Position storage p = _positions[id];
-        require(msg.sender == p.owner, "not owner");
-        require(p.liquidity == 0 && p.owed0 == 0 && p.owed1 == 0, "not empty");
-        delete _positions[id];
     }
 
     function setOwed(uint256 tokenId, uint128 owed0, uint128 owed1) external {
