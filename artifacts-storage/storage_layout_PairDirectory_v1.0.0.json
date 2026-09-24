@@ -1,0 +1,99 @@
+{
+  "storage": [
+    {
+      "astId": 26,
+      "contract": "contracts/helpers/PairDirectory.sol:PairDirectory",
+      "label": "admin",
+      "offset": 0,
+      "slot": "0",
+      "type": "t_address"
+    },
+    {
+      "astId": 31,
+      "contract": "contracts/helpers/PairDirectory.sol:PairDirectory",
+      "label": "quoteTokens",
+      "offset": 0,
+      "slot": "1",
+      "type": "t_mapping(t_address,t_struct(QuoteConfig)537_storage)"
+    },
+    {
+      "astId": 36,
+      "contract": "contracts/helpers/PairDirectory.sol:PairDirectory",
+      "label": "__gap",
+      "offset": 0,
+      "slot": "2",
+      "type": "t_array(t_uint256)48_storage"
+    }
+  ],
+  "types": {
+    "t_address": {
+      "encoding": "inplace",
+      "label": "address",
+      "numberOfBytes": "20"
+    },
+    "t_array(t_uint256)48_storage": {
+      "encoding": "inplace",
+      "label": "uint256[48]",
+      "numberOfBytes": "1536",
+      "base": "t_uint256"
+    },
+    "t_bool": {
+      "encoding": "inplace",
+      "label": "bool",
+      "numberOfBytes": "1"
+    },
+    "t_int24": {
+      "encoding": "inplace",
+      "label": "int24",
+      "numberOfBytes": "3"
+    },
+    "t_mapping(t_address,t_struct(QuoteConfig)537_storage)": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => struct IPairDirectory.QuoteConfig)",
+      "numberOfBytes": "32",
+      "value": "t_struct(QuoteConfig)537_storage"
+    },
+    "t_struct(QuoteConfig)537_storage": {
+      "encoding": "inplace",
+      "label": "struct IPairDirectory.QuoteConfig",
+      "numberOfBytes": "32",
+      "members": [
+        {
+          "astId": 532,
+          "contract": "contracts/helpers/PairDirectory.sol:PairDirectory",
+          "label": "enabled",
+          "offset": 0,
+          "slot": "0",
+          "type": "t_bool"
+        },
+        {
+          "astId": 534,
+          "contract": "contracts/helpers/PairDirectory.sol:PairDirectory",
+          "label": "startTick",
+          "offset": 1,
+          "slot": "0",
+          "type": "t_int24"
+        },
+        {
+          "astId": 536,
+          "contract": "contracts/helpers/PairDirectory.sol:PairDirectory",
+          "label": "updatedAt",
+          "offset": 4,
+          "slot": "0",
+          "type": "t_uint64"
+        }
+      ]
+    },
+    "t_uint256": {
+      "encoding": "inplace",
+      "label": "uint256",
+      "numberOfBytes": "32"
+    },
+    "t_uint64": {
+      "encoding": "inplace",
+      "label": "uint64",
+      "numberOfBytes": "8"
+    }
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "storage": [
+    {
+      "astId": 20,
+      "contract": "contracts/helpers/FeeUseRegistry.sol:FeeUseRegistry",
+      "label": "launcher",
+      "offset": 0,
+      "slot": "0",
+      "type": "t_address"
+    },
+    {
+      "astId": 23,
+      "contract": "contracts/helpers/FeeUseRegistry.sol:FeeUseRegistry",
+      "label": "defaultFeeUse",
+      "offset": 0,
+      "slot": "1",
+      "type": "t_bytes32"
+    },
+    {
+      "astId": 27,
+      "contract": "contracts/helpers/FeeUseRegistry.sol:FeeUseRegistry",
+      "label": "feeUseImpl",
+      "offset": 0,
+      "slot": "2",
+      "type": "t_mapping(t_bytes32,t_address)"
+    },
+    {
+      "astId": 31,
+      "contract": "contracts/helpers/FeeUseRegistry.sol:FeeUseRegistry",
+      "label": "_feeUseOf",
+      "offset": 0,
+      "slot": "3",
+      "type": "t_mapping(t_address,t_bytes32)"
+    },
+    {
+      "astId": 36,
+      "contract": "contracts/helpers/FeeUseRegistry.sol:FeeUseRegistry",
+      "label": "__gap",
+      "offset": 0,
+      "slot": "4",
+      "type": "t_array(t_uint256)46_storage"
+    }
+  ],
+  "types": {
+    "t_address": {
+      "encoding": "inplace",
+      "label": "address",
+      "numberOfBytes": "20"
+    },
+    "t_array(t_uint256)46_storage": {
+      "encoding": "inplace",
+      "label": "uint256[46]",
+      "numberOfBytes": "1472",
+      "base": "t_uint256"
+    },
+    "t_bytes32": {
+      "encoding": "inplace",
+      "label": "bytes32",
+      "numberOfBytes": "32"
+    },
+    "t_mapping(t_address,t_bytes32)": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => bytes32)",
+      "numberOfBytes": "32",
+      "value": "t_bytes32"
+    },
+    "t_mapping(t_bytes32,t_address)": {
+      "encoding": "mapping",
+      "key": "t_bytes32",
+      "label": "mapping(bytes32 => address)",
+      "numberOfBytes": "32",
+      "value": "t_address"
+    },
+    "t_uint256": {
+      "encoding": "inplace",
+      "label": "uint256",
+      "numberOfBytes": "32"
+    }
+  }
+}

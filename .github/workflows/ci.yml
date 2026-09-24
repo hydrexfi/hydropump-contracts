@@ -1,0 +1,114 @@
+name: CI
+
+# Four gates, each its own job so a failure is reported by name:
+#   build     — compiles, stays under the EIP-170 size limit, and is forge-fmt clean
+#   unit      — every test outside test/fork/
+#   storage   — the four upgradeable contracts keep the storage layout of their committed snapshot
+#   fork      — the whole stack against live Hydrex on Base
+#
+# The Foundry toolchain is pinned (see foundry-version-check.yml for why). Every `version:`
+# input below must stay identical; the version check asserts it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build, sizes and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+      - run: npm ci
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+      - name: Build and check contract sizes
+        run: forge build --sizes
+      - name: Check formatting
+        run: npm run fmt:check
+
+  unit:
+    name: unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+      - run: npm ci
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+      - name: Run unit tests
+        run: npm run test:unit
+
+  # Any change that adds, removes or reorders storage in HydropumpLauncher, HydropumpLocker,
+  # PairDirectory or FeeUseRegistry must add a new versioned snapshot in artifacts-storage/.
+  storage:
+    name: storage layout snapshots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+      # foundry.toml resolves @openzeppelin/* from node_modules, so deps must be present first.
+      - run: npm ci
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+      - name: Check storage layouts against committed snapshots
+        run: npm run check:storage-snapshots
+
+  fork:
+    name: fork tests (Base)
+    runs-on: ubuntu-latest
+    env:
+      # A BASE_RPC_URL repository secret is used when an admin sets one; otherwise the public endpoint.
+      BASE_RPC_URL: ${{ secrets.BASE_RPC_URL || 'https://mainnet.base.org' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+      - run: npm ci
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+      # ForkFixture quietly skips every fork suite when it cannot fork (some suites vm.skip, some
+      # return early and report a pass). Prove the RPC answers as Base first, so this job can never
+      # go green without having forked.
+      - name: Check the RPC is reachable and is Base
+        run: |
+          CHAIN_ID="$(cast chain-id --rpc-url "$BASE_RPC_URL")"
+          if [ "$CHAIN_ID" != "8453" ]; then
+            echo "::error::BASE_RPC_URL answered chain id '$CHAIN_ID', expected 8453 (Base)."
+            exit 1
+          fi
+      - name: Run fork tests
+        run: npm run test:fork

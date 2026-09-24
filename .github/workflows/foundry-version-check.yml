@@ -1,0 +1,102 @@
+name: foundry version check
+
+# Why this exists (ported from hydrexfi/hydrex-contracts):
+#
+# CI pins the Foundry toolchain to an exact release (the `version:` inputs in ci.yml). Pinning is
+# deliberate: an unpinned `nightly` silently broke hydrex-contracts' build for days. The cost of
+# pinning is rot, and Dependabot cannot cover it (its `github-actions` ecosystem reads `uses:`
+# references only, never step inputs), so this job does it.
+#
+# It only opens an issue. It never bumps the pin: changing the compiler toolchain on a repo that
+# gates on storage-layout snapshots is a reviewed change, not an automated one.
+
+on:
+  schedule:
+    # Mondays 08:00 UTC. GitHub disables scheduled workflows after 60 days of repo inactivity,
+    # which is why this also carries workflow_dispatch.
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    name: check pinned foundry version against latest stable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare pinned version against latest stable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Every foundry-toolchain `version:` input across all workflows, scoped to lines
+          # following the action reference so an unrelated pin can't be picked up by mistake.
+          PINNED="$(
+            grep -rhA4 'foundry-rs/foundry-toolchain' .github/workflows/ \
+              | sed -n 's/.*version:[[:space:]]*\(v\{0,1\}[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' \
+              | sort -u
+          )"
+          COUNT="$(printf '%s\n' "$PINNED" | grep -c . || true)"
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::No pinned Foundry version found. Has a workflow drifted back to 'nightly'?"
+            exit 1
+          fi
+
+          # A job added later that kept `nightly` while the others were pinned would leave the
+          # pin only partially applied.
+          if [ "$COUNT" -gt 1 ]; then
+            echo "::error::Inconsistent Foundry pins across workflows: $(printf '%s' "$PINNED" | tr '\n' ' ')"
+            exit 1
+          fi
+
+          CURRENT="$PINNED"
+          LATEST="$(gh api repos/foundry-rs/foundry/releases/latest --jq '.tag_name')"
+          echo "pinned=$CURRENT latest=$LATEST"
+
+          if [ "$CURRENT" = "$LATEST" ]; then
+            echo "Foundry pin is current ($CURRENT)."
+            exit 0
+          fi
+
+          TITLE="ci(foundry): pinned toolchain $CURRENT is behind stable $LATEST"
+
+          # Don't re-open the same issue every week.
+          EXISTING="$(gh issue list --state open --label foundry-pin --json title --jq \
+            "map(select(.title == \"$TITLE\")) | length")"
+          if [ "$EXISTING" != "0" ]; then
+            echo "Issue already open for $LATEST; nothing to do."
+            exit 0
+          fi
+
+          gh label create foundry-pin --color ededed \
+            --description "Foundry toolchain pin is behind the stable channel" 2>/dev/null || true
+
+          gh issue create \
+            --title "$TITLE" \
+            --label foundry-pin \
+            --body "$(cat <<BODY
+          CI pins the Foundry toolchain to **$CURRENT**. The current stable release is **$LATEST**.
+
+          Release notes: https://github.com/foundry-rs/foundry/releases/tag/$LATEST
+
+          ## Before bumping
+
+          Run these locally under the candidate version before merging a bump (\`forge clean\` first,
+          so the compile is cold):
+
+          - \`npm run test:unit\` and \`npm run fmt:check\` — formatter output can change between releases.
+          - \`npm run check:storage-snapshots\` — this diffs \`forge inspect\` output, so an output-format
+            change shows up as a spurious storage-layout regression.
+          - \`forge build --sizes\` — the optimizer can move runtime sizes.
+
+          Update every \`version:\` input in ci.yml together — they are asserted to be identical.
+
+          _Opened automatically by \`.github/workflows/foundry-version-check.yml\`._
+          BODY
+          )"
