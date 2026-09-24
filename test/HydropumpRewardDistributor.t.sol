@@ -277,6 +277,25 @@ contract HydropumpRewardDistributorTest is Test {
         assertEq(distributor.claim(address(hydx)), 150e18, "and it pays in full");
     }
 
+    /// Once the contract is already short (here after an emergency withdrawal), the owner must still be
+    /// able to tidy the ledger a recipient at a time: a call that lowers what is owed never makes the
+    /// shortfall worse, so it is allowed even though the contract is still short afterwards.
+    function test_AReductionIsAllowedWhileTheContractIsShort() public {
+        _allocate(address(hydx), alice, 30e18, bob, 70e18);
+        vm.prank(owner);
+        distributor.emergencyWithdraw(address(hydx), owner, 100e18);
+
+        address[] memory recipients = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        (recipients[0], amounts[0]) = (alice, 0);
+
+        vm.prank(owner);
+        distributor.setAllocation(address(hydx), recipients, amounts);
+
+        assertEq(distributor.claimable(alice, address(hydx)), 0);
+        assertEq(distributor.totalOwed(address(hydx)), 70e18, "bob's 70 is still owed, and still short");
+    }
+
     /// A cancelled allocation cannot be claimed, and what it freed is withdrawable.
     function test_ClawbackThenWithdraw() public {
         _allocate(address(hydx), alice, 30e18, bob, 70e18);
@@ -331,7 +350,8 @@ contract HydropumpRewardDistributorTest is Test {
         assertEq(distributor.operator(), stranger);
     }
 
-    /// HP-20: the zero address can never write allocations, so it can never be the operator.
+    /// HP-20: `setOperator` refuses the zero address. (The constructor does not check it; a zero operator
+    /// only leaves the owner as the one caller who can allocate.)
     function test_SetOperatorRejectsZeroAddress() public {
         vm.prank(owner);
         vm.expectRevert(HydropumpRewardDistributor.ZeroAddress.selector);

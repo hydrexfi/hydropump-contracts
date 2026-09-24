@@ -114,14 +114,19 @@ contract HydropumpRewardDistributor is Ownable2Step {
     /// @notice Overwrite what recipients can still claim, to whatever the owner says — including nothing.
     /// @dev Moves no tokens, so it could otherwise make the ledger promise more than the contract holds: a
     ///      raise with nothing behind it, or a "reduction" of someone who has already claimed, which re-opens
-    ///      a payout. Postcondition, the invariant `allocate` keeps too:
-    ///      `totalOwed[token] <= IERC20(token).balanceOf(address(this))`, or the whole call reverts.
+    ///      a payout. So a call that raises `totalOwed[token]` must leave it no higher than the contract's
+    ///      balance, or the whole call reverts. A call that does not raise it is always allowed, so the owner
+    ///      can still tidy the ledger one recipient at a time when the contract is already short (after an
+    ///      `emergencyWithdraw`, say). For tokens that transfer exactly the amount requested, `allocate`
+    ///      keeps `totalOwed <= balance` too.
     function setAllocation(address token, address[] calldata recipients, uint256[] calldata amounts)
         external
         onlyOwner
     {
         if (token == address(0)) revert ZeroAddress();
         if (recipients.length != amounts.length) revert LengthMismatch();
+
+        uint256 owedBefore = totalOwed[token];
 
         for (uint256 i = 0; i < recipients.length; i++) {
             if (recipients[i] == address(0)) revert ZeroAddress();
@@ -133,7 +138,10 @@ contract HydropumpRewardDistributor is Ownable2Step {
             emit AllocationSet(token, recipients[i], previous, amounts[i]);
         }
 
-        if (totalOwed[token] > IERC20(token).balanceOf(address(this))) revert AllocationExceedsBalance();
+        uint256 owedAfter = totalOwed[token];
+        if (owedAfter > owedBefore && owedAfter > IERC20(token).balanceOf(address(this))) {
+            revert AllocationExceedsBalance();
+        }
     }
 
     /// @notice Take any balance out, allocated or not.
