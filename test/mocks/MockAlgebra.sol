@@ -38,11 +38,19 @@ library MockTickMath {
 }
 
 /// @notice Stand-in for an Algebra Integral pool, carrying only what the launcher reads off one.
+/// @dev Also its own plugin, keeping the tick from before each block's first swap.
 contract MockAlgebraPool {
     address public token0;
     address public token1;
     int24 public tickSpacing;
     uint160 public price;
+
+    uint16 public timepointIndex;
+    uint32 public lastTimepointTimestamp;
+    int24 internal _timepointTick;
+
+    address public plugin = address(this);
+    uint16 public pluginConfig = 1; // BEFORE_SWAP_FLAG
 
     function init(address _token0, address _token1, int24 _tickSpacing, uint160 _price) external {
         (token0, token1, tickSpacing, price) = (_token0, _token1, _tickSpacing, _price);
@@ -52,8 +60,23 @@ contract MockAlgebraPool {
         price = _price;
     }
 
+    function setPlugin(address _plugin, uint16 _pluginConfig) external {
+        (plugin, pluginConfig) = (_plugin, _pluginConfig);
+    }
+
+    function writeTimepoint() external {
+        if (lastTimepointTimestamp == block.timestamp) return;
+        lastTimepointTimestamp = uint32(block.timestamp);
+        _timepointTick = MockTickMath.tickAtSqrtRatio(price);
+        timepointIndex++;
+    }
+
+    function timepoints(uint256) external view returns (bool, uint32, int56, uint88, int24, int24, uint16) {
+        return (true, lastTimepointTimestamp, 0, 0, _timepointTick, _timepointTick, 0);
+    }
+
     function globalState() external view returns (uint160, int24, uint16, uint16, uint16, bool) {
-        return (price, MockTickMath.tickAtSqrtRatio(price), 0, 0, 0, true);
+        return (price, MockTickMath.tickAtSqrtRatio(price), 0, pluginConfig, 0, true);
     }
 
     function liquidity() external pure returns (uint128) {
@@ -291,8 +314,7 @@ interface IMockPoolPayer {
 /// @notice Stand-in for the Algebra swap router, etched at the address the contracts hardcode.
 /// @dev Fills at the pool's own spot price less a flat fee, out of the pool's balance, then steps the price
 ///      a fixed number of ticks in whichever direction the trade implies. Not a curve — the fork tests
-///      price real swaps — but pricing off spot rather than a constant is what makes a TWAP bound testable:
-///      a test can shove spot away from the time-weighted tick and watch the bound reject the fill.
+///      price real swaps. A limit inside that step fills pro rata and pulls only what it used.
 contract MockSwapRouter {
     MockAlgebra public immutable manager;
 
@@ -316,16 +338,31 @@ contract MockSwapRouter {
 
         address pool = manager.poolFor(token0, token1);
         require(pool != address(0), "no pool");
+        MockAlgebraPool(pool).writeTimepoint();
 
+        bool zeroToOne = params.tokenIn == token0;
         int24 spot = MockTickMath.tickAtSqrtRatio(MockAlgebraPool(pool).price());
-        amountOut = MockTickMath.quoteAtTick(spot, params.amountIn, params.tokenIn == token0);
+        int24 moved = zeroToOne ? spot - bump : spot + bump;
+
+        uint256 amountIn = params.amountIn;
+        if (params.limitSqrtPrice != 0) {
+            uint160 current = MockAlgebraPool(pool).price();
+            require(zeroToOne ? params.limitSqrtPrice < current : params.limitSqrtPrice > current, "SPL");
+            int24 limit = MockTickMath.tickAtSqrtRatio(params.limitSqrtPrice);
+            int24 room = zeroToOne ? spot - limit : limit - spot;
+            if (room < bump) {
+                amountIn = (amountIn * uint24(room)) / uint24(bump);
+                moved = limit;
+            }
+        }
+
+        amountOut = MockTickMath.quoteAtTick(spot, amountIn, zeroToOne);
         amountOut -= (amountOut * feePips) / 1_000_000;
         require(amountOut >= params.amountOutMinimum, "Too little received");
 
-        IERC20(params.tokenIn).transferFrom(msg.sender, pool, params.amountIn);
+        IERC20(params.tokenIn).transferFrom(msg.sender, pool, amountIn);
         IMockPoolPayer(pool).pay(params.tokenOut, params.recipient, amountOut);
 
-        int24 moved = params.tokenOut == token0 ? spot + bump : spot - bump;
         MockAlgebraPool(pool).setPrice(TickMath.getSqrtRatioAtTick(moved));
     }
 }

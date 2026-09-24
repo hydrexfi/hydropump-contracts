@@ -222,4 +222,15 @@ abstract contract HydropumpFixture is Test {
     function _setSpot(address pool, int24 tick) internal {
         MockAlgebraPool(pool).setPrice(TickMath.getSqrtRatioAtTick(tick));
     }
+
+    /// @dev Moves spot as a swap earlier in this block would, leaving the block's opening tick recorded.
+    function _moveSpotThisBlock(address pool, int24 tick) internal {
+        MockAlgebraPool(pool).writeTimepoint();
+        _setSpot(pool, tick);
+    }
+
+    /// @dev Tick offset that moves the launch token's price by `ticks`, whichever side it is.
+    function _launchPriceOffset(address token, int24 ticks) internal view returns (int24) {
+        return token < locker.quoteTokenOf(token) ? ticks : -ticks;
+    }
 }
