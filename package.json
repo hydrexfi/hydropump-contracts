@@ -8,6 +8,7 @@
   "scripts": {
     "test:unit": "forge test --no-match-path 'test/fork/*'",
     "test:fork": "forge test --match-path 'test/fork/*' -vv",
+    "test:fork:strict": "bash ./scripts/forkTestStrict.sh",
     "fmt:check": "forge fmt --check",
     "check:storage-snapshots": "node ./scripts/checkStorageSnapshots.js",
     "deploy:base": "source .env && NETWORK=base forge script script/deploy/DeployHydropump.s.sol:DeployHydropump --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast --verify --verifier etherscan --verifier-url \"https://api.etherscan.io/v2/api?chainid=8453\" --etherscan-api-key $BASESCAN_API_KEY",

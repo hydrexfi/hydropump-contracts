@@ -31,11 +31,13 @@ rule working. Log it and move on; do not reason your way past it.
    npm run fmt:check
    npm run check:storage-snapshots
    ```
-   And `npm run test:fork` before any commit that changes `contracts/`.
+   And `npm run test:fork:strict` before any commit that changes `contracts/`. If the work order lists
+   known fork failures on `main`, exclude exactly those by name (`-- --no-match-test '<names>'`) and
+   confirm in the report that they still fail with the same messages. Any other fork failure is yours.
 
 2. **A fork test that did not fork proves nothing.** Without an RPC every fork suite skips its tests, and
-   the run still finishes green. Before relying on a fork result, check `cast chain-id --rpc-url
-   "$BASE_RPC_URL"` prints `8453` and the summary shows 0 skipped, and log that you checked.
+   the run still finishes green. Use `npm run test:fork:strict`, which fails
+   unless the RPC answers as Base and nothing was skipped. Never print or log `BASE_RPC_URL`: it holds a key.
 
 3. **Fail, fix, pass — and log all three.** The new test must fail on the unfixed code. Log the failing
    output's key line before you change the contract. A test that would pass against a no-op is not a test.

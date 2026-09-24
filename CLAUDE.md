@@ -15,17 +15,21 @@ Findings labelled `HP-01` … `HP-23` refer to the internal security review of 2
 | Install | `npm ci` (OpenZeppelin comes from `node_modules`; forge-std is a git submodule) |
 | Build and size check | `forge build --sizes` |
 | Unit tests | `npm run test:unit` |
-| Fork tests | `npm run test:fork` — needs `BASE_RPC_URL` (see below) |
+| Fork tests | `npm run test:fork:strict` — needs `BASE_RPC_URL`; fails if the RPC is not Base or any test skips (see below) |
 | Format check | `npm run fmt:check` (fix with `forge fmt`) |
 | Storage layouts | `npm run check:storage-snapshots` |
 
-CI (`.github/workflows/ci.yml`) runs all of these except install on every PR, in four jobs.
+CI (`.github/workflows/ci.yml`) runs build, unit, format and storage checks on every PR. It does **not** run
+the fork tests yet (the public RPC rate-limits them; a private one needs an admin-set secret), so run
+`npm run test:fork:strict` locally before pushing any change under `contracts/`.
 
 **Fork tests do not fail without an RPC.** When `BASE_RPC_URL` is unset, every fork suite marks its
 tests skipped (`vm.skip`), so a run can finish green having tested nothing. Each suite has its own guard;
-five of the nine share `test/fork/helpers/ForkFixture.sol`. Foundry loads `.env` automatically, and
-`.env.example` has the public endpoint. Before trusting a fork result, check that
-`cast chain-id --rpc-url "$BASE_RPC_URL"` prints `8453` and that the summary shows no skipped tests.
+five of the nine share `test/fork/helpers/ForkFixture.sol`. Foundry loads `.env` automatically. The public
+endpoint in `.env.example` is rate-limited too hard for the full fork suite; put a private RPC URL in
+`.env` (never in `.env.example`, which is tracked). `npm run test:fork:strict` refuses to pass
+unless the RPC answers as Base (chain id 8453) and nothing was skipped; use it rather than `test:fork`
+whenever the result matters.
 
 ## Upgradeable contracts and storage
 
@@ -59,7 +63,7 @@ Never edit an existing snapshot file. Constants, immutables and transient storag
 ## Definition of done
 
 - `forge build --sizes`, `npm run test:unit`, `npm run fmt:check` and `npm run check:storage-snapshots`
-  pass; `npm run test:fork` passes against a reachable Base RPC when a contract under `contracts/` changed.
+  pass; `npm run test:fork:strict` passes when a contract under `contracts/` changed.
 - New or changed behaviour has a test that would fail without the change.
 - The `code-reviewer` agent has reviewed the diff and nothing above LOW is left unaddressed.
 - The PR body says what changed, why, the risk (including any upgrade or redeploy step) and the tests.
