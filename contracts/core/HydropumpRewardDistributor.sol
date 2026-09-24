@@ -112,13 +112,7 @@ contract HydropumpRewardDistributor is Ownable2Step {
     }
 
     /// @notice Overwrite what recipients can still claim, to whatever the owner says — including nothing.
-    /// @dev Moves no tokens, so it could otherwise make the ledger promise more than the contract holds: a
-    ///      raise with nothing behind it, or a "reduction" of someone who has already claimed, which re-opens
-    ///      a payout. So a call that raises `totalOwed[token]` must leave it no higher than the contract's
-    ///      balance, or the whole call reverts. A call that does not raise it is always allowed, so the owner
-    ///      can still tidy the ledger one recipient at a time when the contract is already short (after an
-    ///      `emergencyWithdraw`, say). For tokens that transfer exactly the amount requested, `allocate`
-    ///      keeps `totalOwed <= balance` too.
+    /// @dev Reverts if the call raises `totalOwed` above the balance; reductions always go through.
     function setAllocation(address token, address[] calldata recipients, uint256[] calldata amounts)
         external
         onlyOwner

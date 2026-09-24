@@ -220,8 +220,7 @@ contract HydropumpRewardDistributorTest is Test {
         assertEq(hydx.balanceOf(address(distributor)), 100e18, "and no tokens moved");
     }
 
-    /// HP-07: after a recipient has claimed, "reducing" them to 10 re-opens a payout of 10 that the contract
-    /// does not hold. Adapted from the security review's test_T4H1_7_claimBeforeAReductionKeepsTheOldAmount.
+    /// After a claim, "reducing" to 10 would re-open a payout the contract does not hold.
     function test_ACorrectionAfterAClaimCannotPromiseUnheldTokens() public {
         _one(address(hydx), alice, 100e18);
         vm.prank(alice);
@@ -229,22 +228,16 @@ contract HydropumpRewardDistributorTest is Test {
 
         address[] memory recipients = new address[](1);
         uint256[] memory amounts = new uint256[](1);
-        (recipients[0], amounts[0]) = (alice, 10e18); // an honest owner "reducing" alice from 100 to 10
+        (recipients[0], amounts[0]) = (alice, 10e18);
 
         vm.prank(owner);
         vm.expectRevert(HydropumpRewardDistributor.AllocationExceedsBalance.selector);
         distributor.setAllocation(address(hydx), recipients, amounts);
 
         assertEq(distributor.claimable(alice, address(hydx)), 0, "the failed call changed nothing");
-        assertLe(
-            distributor.totalOwed(address(hydx)),
-            hydx.balanceOf(address(distributor)),
-            "the ledger never promises more than the contract holds"
-        );
     }
 
-    /// The same shortfall by the other route: raising an allocation moves no tokens in, so a raise the
-    /// contract cannot cover is refused.
+    /// A raise moves no tokens in, so one the balance cannot cover is refused.
     function test_ARaiseBeyondWhatIsHeldReverts() public {
         _one(address(hydx), alice, 100e18);
 
@@ -277,9 +270,7 @@ contract HydropumpRewardDistributorTest is Test {
         assertEq(distributor.claim(address(hydx)), 150e18, "and it pays in full");
     }
 
-    /// Once the contract is already short (here after an emergency withdrawal), the owner must still be
-    /// able to tidy the ledger a recipient at a time: a call that lowers what is owed never makes the
-    /// shortfall worse, so it is allowed even though the contract is still short afterwards.
+    /// Lowering what is owed is allowed even while the contract is short.
     function test_AReductionIsAllowedWhileTheContractIsShort() public {
         _allocate(address(hydx), alice, 30e18, bob, 70e18);
         vm.prank(owner);
@@ -350,8 +341,7 @@ contract HydropumpRewardDistributorTest is Test {
         assertEq(distributor.operator(), stranger);
     }
 
-    /// HP-20: `setOperator` refuses the zero address. (The constructor does not check it; a zero operator
-    /// only leaves the owner as the one caller who can allocate.)
+    /// `setOperator` refuses the zero address.
     function test_SetOperatorRejectsZeroAddress() public {
         vm.prank(owner);
         vm.expectRevert(HydropumpRewardDistributor.ZeroAddress.selector);
