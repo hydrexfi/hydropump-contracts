@@ -319,4 +319,13 @@ contract HydropumpRewardDistributorTest is Test {
         distributor.setOperator(stranger);
         assertEq(distributor.operator(), stranger);
     }
+
+    /// HP-20: the zero address can never write allocations, so it can never be the operator.
+    function test_SetOperatorRejectsZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(HydropumpRewardDistributor.ZeroAddress.selector);
+        distributor.setOperator(address(0));
+
+        assertEq(distributor.operator(), operator, "unchanged");
+    }
 }
