@@ -28,3 +28,4 @@
 15:51  NOTE  gas after the review fixes (one extra TLOAD in the self-only check): handleAllRewards avg 585216 -> 586060, +844 (+0.14%); median 568730 -> 569558. handleCreatorRewards +379, handleProtocolRewards -1100, splitRewards +447, spendCreatorShare +456. Locker runtime 10,760 -> 10,999 B
 15:51  NOTE  COST wall clock 1 h 54 min, $0.00 model spend
 15:52  DONE  review fixes committed — MEDIUM and all three LOWs taken, one LOW declined with the work order's instruction as the reason
+15:52  DONE  PR #14 open against main, body says Closes #8 — https://github.com/hydrexfi/hydropump-contracts/pull/14

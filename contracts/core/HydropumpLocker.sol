@@ -118,6 +118,7 @@ contract HydropumpLocker is
     error NotLauncher();
     error NotNFTPositionManager();
     error NotCreatorRecipient();
+    error NotGuardedSelfCall();
     error AlreadyRegistered();
     error UnknownLaunch();
     error ConvertFirst();
@@ -127,7 +128,6 @@ contract HydropumpLocker is
     error InvalidFeeSplit();
     error RegistryUnset();
     error UnknownFeeUse();
-    error NotGuardedSelfCall();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
