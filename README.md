@@ -96,11 +96,7 @@ Underneath are the primitives, for one step at a time: `splitRewards` (collect a
 **`splitRewards` can never fail on its own.** It touches no pool, no swap and no third-party contract — it
 only moves numbers. Everything that can fail is downstream of it, so a broken fee use or an unfillable pool
 leaves the share booked and reachable rather than stranding it, and one creator's choice can never block
-another's fees or the protocol's. The one way it does refuse is a call made from inside another locker
-call: every entry point that moves tokens or changes the ledger takes a reentrancy guard, so no two of them
-can run at once. The single exception, `deliverProtocolShareFromSelf`, is callable only by the locker
-itself and only from inside a guarded call. Nothing legitimate re-enters the locker — the fee uses only
-read from it.
+another's fees or the protocol's. It does refuse re-entry: every locker entry point is `nonReentrant`.
 
 **Send `handleAllRewards` with a generous gas limit.** Its protocol half is wrapped in a `try` so a pool
 that cannot fill a sell does not stop a creator being paid — but that means the call succeeds whether or

@@ -18,15 +18,6 @@ import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
 
 /// @title HydropumpLocker
 /// @notice Holds every launch's positions permanently and splits the fees they earn.
-/// @dev Every entry point that moves tokens or changes `creatorOwed` / `protocolOwed` is `nonReentrant`,
-///      so at most one of them runs at a time. `spendCreatorShare` depends on that: it infers what a fee
-///      use handed back from how much the locker's balance rose while the fee use ran, and any other
-///      launch's fees arriving inside that window would be booked twice. The guard keeps its flag in
-///      transient storage, so it takes no storage slot and the layout is unchanged.
-///
-///      One exception, `deliverProtocolShareFromSelf`, carries no guard of its own because it exists to
-///      be called from inside one. It refuses any caller but this contract, and refuses even this
-///      contract unless a guard is already held.
 contract HydropumpLocker is
     Initializable,
     Ownable2StepUpgradeable,
@@ -242,8 +233,6 @@ contract HydropumpLocker is
         return _splitRewards(token, positionMask);
     }
 
-    /// @dev The body of both `splitRewards` overloads, so the entry points above and the combined entry
-    ///      points below take the guard once rather than nesting it.
     function _splitRewards(address token, uint256 positionMask)
         internal
         returns (uint256 toCreator, uint256 toProtocol)
@@ -308,13 +297,6 @@ contract HydropumpLocker is
     ///         Permissionless; the destination was fixed at launch.
     /// @dev Separate from the split so a fee use that reverts cannot stop fees being collected. If it
     ///      does revert, the share stays booked here until the registry is repointed.
-    ///
-    ///      Invariant this relies on: no locker entry point can run while another is in progress. The
-    ///      re-book below reads the balance rise across `onFees` and credits all of it to `token`, which
-    ///      is only that launch's money if nothing else could have paid the locker in the meantime. The
-    ///      `nonReentrant` on every entry point that moves tokens or touches `creatorOwed` /
-    ///      `protocolOwed` is what makes that true — a fee use, or a quote token's transfer hook, calling
-    ///      back into `splitRewards` for another launch is refused rather than double-booked.
     function spendCreatorShare(address token)
         public
         nonReentrant
@@ -323,7 +305,6 @@ contract HydropumpLocker is
         return _spendCreatorShare(token);
     }
 
-    /// @dev The body of `spendCreatorShare`, so the combined entry points take the guard once.
     function _spendCreatorShare(address token) internal returns (uint256 launchTokenAmount, uint256 quoteAmount) {
         address registry = feeUseRegistry;
         if (registry == address(0)) revert RegistryUnset();
@@ -359,9 +340,7 @@ contract HydropumpLocker is
 
         // A fee use returns what it could not use — auto-LP does this on nearly every call, since a band
         // takes one ratio. Re-booking it keeps it payable instead of leaving it loose in this contract,
-        // where no ledger would ever pay it out. What the balance rose by is this fee use's return and
-        // nothing else only because the guard held for the whole call: without it, another launch's fees
-        // collected mid-call would be booked to that launch and credited here a second time.
+        // where no ledger would ever pay it out. Only safe because the guard blocks other fees landing mid-call.
         _rebook(token, token, IERC20(token).balanceOf(address(this)) - heldLaunchToken);
         _rebook(token, quoteToken, IERC20(quoteToken).balanceOf(address(this)) - heldQuote);
 
@@ -420,16 +399,7 @@ contract HydropumpLocker is
         return _deliverProtocolShare(token);
     }
 
-    /// @notice The same delivery, callable only by this contract and only from inside a guarded call.
-    /// @dev `handleAllRewards` makes the protocol half best-effort, and `try` needs a real external call to
-    ///      get a frame it can roll back. Calling `deliverProtocolShare` would hit the guard
-    ///      `handleAllRewards` is already holding and be swallowed by the `catch`, never delivering — so
-    ///      the self-call goes through this unguarded twin instead.
-    ///
-    ///      Precondition, checked rather than argued: `msg.sender` is this contract AND the reentrancy
-    ///      guard is currently held. The second half is what makes "this only ever runs inside a guarded
-    ///      frame" a property of this function rather than of the rest of the file — a later upgrade that
-    ///      adds a second self-call, a fallback, or an `onFees` to the locker cannot quietly widen it.
+    /// @dev Unguarded twin for `handleAllRewards`' `try`, which would otherwise hit its own guard.
     function deliverProtocolShareFromSelf(address token) external returns (uint256 delivered) {
         if (msg.sender != address(this) || !_reentrancyGuardEntered()) revert NotGuardedSelfCall();
         return _deliverProtocolShare(token);
