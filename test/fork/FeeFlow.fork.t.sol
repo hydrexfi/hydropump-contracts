@@ -155,13 +155,18 @@ contract FeeFlowForkTest is ForkFixture {
         uint256 supplyBefore = IERC20(token).totalSupply();
 
         vm.prank(bob);
+        vm.expectRevert(HydropumpLocker.NotLaunchCreator.selector);
+        locker.spendCreatorShare(token);
+        assertEq(IERC20(token).totalSupply(), supplyBefore);
+
+        vm.prank(creator);
         locker.spendCreatorShare(token);
 
         uint256 burned = buybackBurn.lifetimeBurned(token);
         assertGt(burned, 0);
         assertEq(IERC20(token).totalSupply(), supplyBefore - burned, "supply actually fell");
         assertEq(IERC20(token).balanceOf(address(buybackBurn)), 0, "nothing kept back");
-        assertEq(IERC20(token).balanceOf(bob), 0, "the caller took nothing");
+        assertEq(IERC20(token).balanceOf(creator), 0, "the creator took nothing");
 
         console2.log("burned", burned);
     }
@@ -183,6 +188,7 @@ contract FeeFlowForkTest is ForkFixture {
 
         locker.spendCreatorShare(paid);
         locker.spendCreatorShare(pooled);
+        vm.prank(creator);
         locker.spendCreatorShare(burned);
 
         (,,,,,,, uint128 pooledLiquidityAfter,,,,) = NPM.positions(pooledPosition);

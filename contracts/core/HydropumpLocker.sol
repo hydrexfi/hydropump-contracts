@@ -14,6 +14,7 @@ import {IFeeUse} from "../interfaces/IFeeUse.sol";
 import {INonfungiblePositionManager} from "../interfaces/INonfungiblePositionManager.sol";
 import {ISwapRouter} from "../interfaces/ISwapRouter.sol";
 import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
+import {FeeUses} from "../libraries/FeeUses.sol";
 
 /// @title HydropumpLocker
 /// @notice Holds every launch's positions permanently and splits the fees they earn.
@@ -110,6 +111,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     error InvalidFeeSplit();
     error RegistryUnset();
     error UnknownFeeUse();
+    error NotLaunchCreator();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -274,7 +276,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     }
 
     /// @notice Push the booked creator share to the launch's fee use, which spends it on arrival.
-    ///         Permissionless; the destination was fixed at launch.
+    ///         Buyback-and-burn launches can only be spent by their original creator.
     /// @dev Separate from the split so a fee use that reverts cannot stop fees being collected. If it
     ///      does revert, the share stays booked here until the registry is repointed.
     function spendCreatorShare(address token) public returns (uint256 launchTokenAmount, uint256 quoteAmount) {
@@ -287,6 +289,9 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
 
         address feeUse = IFeeUseRegistry(registry).implementationFor(token);
         if (feeUse == address(0)) revert UnknownFeeUse();
+        if (IFeeUseRegistry(registry).feeUseOf(token) == FeeUses.BUYBACK_BURN && msg.sender != launch.creator) {
+            revert NotLaunchCreator();
+        }
 
         launchTokenAmount = creatorOwed[token][token];
         quoteAmount = creatorOwed[token][quoteToken];
@@ -331,8 +336,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Collect, then spend the creator's share on whatever the launch chose.
-    /// @dev Permissionless and unpointable: the destination was fixed at launch, so "claim", "buy back
-    ///      and burn" and "auto-LP" are all this call under three labels.
+    /// @dev Creator-only for buyback-and-burn launches; other fee uses remain permissionless.
     function handleCreatorRewards(address token) external returns (uint256 launchTokenAmount, uint256 quoteAmount) {
         splitRewards(token, fullMask(token));
         return spendCreatorShare(token);
@@ -348,6 +352,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     }
 
     /// @notice Both sides in one transaction. What the frontend button calls.
+    ///         The creator must call for buyback-and-burn launches.
     /// @dev The protocol half is best-effort: it is the only part that touches the pool, and a pool that
     ///      cannot fill a sell must not stop a creator being paid. On failure the share stays booked in
     ///      `protocolOwed` for a later call.
