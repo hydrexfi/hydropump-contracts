@@ -2,10 +2,11 @@
 
 > **Superseded in part (24 September 2026, after review).** The `setAllocation` change this report
 > describes, making the amount a lifetime total, was replaced. `setAllocation` keeps its original
-> meaning, what a recipient can still claim, and now reverts if it would leave the distributor
-> owing more than it holds (`AllocationExceedsBalance`). That closes the review's case, a correction
+> meaning, what a recipient can still claim, and now reverts if a call raises what the distributor
+> owes above what it holds (`AllocationExceedsBalance`). That closes the review's case, a correction
 > after a claim, and a second route to the same shortfall that the lifetime-total design left open:
-> an unfunded raise. The work order had set the lifetime-total design; the session followed it
+> an unfunded raise. A call that lowers what is owed is always allowed, so the owner can tidy the
+> ledger while the contract is short. The work order had set the lifetime-total design; the session followed it
 > correctly. The `setOperator` zero-address fix below is unchanged. The PR body describes the
 > current fix.
 
