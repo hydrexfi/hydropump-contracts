@@ -70,7 +70,7 @@ contract LaunchB20ForkTest is ForkFixture {
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: AAPLC,
                 tokenOut: token,
-                deployer: address(0),
+                deployer: launcher.poolDeployer(),
                 recipient: alice,
                 deadline: block.timestamp,
                 amountIn: amountIn,

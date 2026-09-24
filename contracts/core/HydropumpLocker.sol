@@ -470,12 +470,14 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     /// @dev Sells into the launch's own pool with no minimum out. See `convertProtocolShare` for why the
     ///      absence of a bound is a deliberate trade rather than an oversight.
     function _convert(address token, address quoteToken, uint256 amountIn) internal returns (uint256 quoteOut) {
+        // Position metadata preserves the namespace for both legacy and custom launches.
+        (,,,, address deployer,,,,,,,) = nonfungiblePositionManager.positions(_launches[token].positionIds[0]);
         IERC20(token).forceApprove(address(swapRouter), amountIn);
         quoteOut = swapRouter.exactInputSingle(
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: token,
                 tokenOut: quoteToken,
-                deployer: address(0),
+                deployer: deployer,
                 recipient: address(this),
                 deadline: block.timestamp,
                 amountIn: amountIn,

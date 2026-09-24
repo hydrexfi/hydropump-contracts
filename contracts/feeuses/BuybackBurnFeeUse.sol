@@ -9,6 +9,7 @@ import {IFeeUse} from "../interfaces/IFeeUse.sol";
 import {IHydropumpLocker} from "../interfaces/IHydropumpLocker.sol";
 import {ISwapRouter} from "../interfaces/ISwapRouter.sol";
 import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
+import {INonfungiblePositionManager} from "../interfaces/INonfungiblePositionManager.sol";
 
 /// @title BuybackBurnFeeUse
 /// @notice Spends a launch's fees buying its own token back and destroying it.
@@ -48,12 +49,17 @@ contract BuybackBurnFeeUse is IFeeUse {
 
         uint256 bought;
         if (quoteAmount > 0) {
+            // Read the launch's own position: legacy pools use zero, custom pools
+            // retain their original namespace even after a launcher upgrade.
+            uint256[] memory positions = locker.getPositions(token);
+            (,,,, address deployer,,,,,,,) =
+                INonfungiblePositionManager(HydropumpAddresses.NONFUNGIBLE_POSITION_MANAGER).positions(positions[0]);
             IERC20(quoteToken).forceApprove(address(swapRouter), quoteAmount);
             bought = swapRouter.exactInputSingle(
                 ISwapRouter.ExactInputSingleParams({
                     tokenIn: quoteToken,
                     tokenOut: token,
-                    deployer: address(0),
+                    deployer: deployer,
                     recipient: address(this),
                     deadline: block.timestamp,
                     amountIn: quoteAmount,

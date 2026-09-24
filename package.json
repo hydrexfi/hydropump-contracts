@@ -6,7 +6,10 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "test:fork": "forge test --match-path 'test/fork/*' -vv",
+    "build:plugins": "FOUNDRY_PROFILE=plugins forge build --sizes",
+    "test:plugins": "FOUNDRY_PROFILE=plugins forge test --fuzz-runs 1000",
+    "test:fork": "FOUNDRY_PROFILE=plugins forge build && forge test --match-path 'test/fork/*' -vv",
+    "test:launch-fee": "FOUNDRY_PROFILE=plugins forge build && BASE_RPC_URL=${BASE_RPC_URL:-https://mainnet.base.org} BASE_FORK_BLOCK=51716638 forge test --match-contract 'LaunchFeeFlow.*ForkTest' --threads 1 -vv",
     "deploy:base": "source .env && NETWORK=base forge script script/deploy/DeployHydropump.s.sol:DeployHydropump --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast --verify --verifier etherscan --verifier-url \"https://api.etherscan.io/v2/api?chainid=8453\" --etherscan-api-key $BASESCAN_API_KEY",
     "quotes:build": "node script/quotes/build-quote-tokens.mjs",
     "quotes:register:base": "source .env && forge script script/quotes/RegisterQuoteTokens.s.sol:RegisterQuoteTokens --rpc-url ${BASE_RPC_URL:-https://mainnet.base.org} --slow --broadcast",

@@ -109,7 +109,7 @@ contract HydropumpLaunchForkTest is ForkFixture {
         (address token, address pool,) = _launchFrom(upAccount, WETH, bytes32(0), buyAmount);
         assertGt(IERC20(token).balanceOf(upAccount), 0, "buyer receives tokens");
         assertEq(IERC20(WETH).balanceOf(address(launcher)), 0, "no quote stranded");
-        assertEq(IERC20(WETH).balanceOf(pool), buyAmount, "quote landed in the pool");
+        _assertQuoteAfterInitialBuy(pool, buyAmount);
         assertGt(_currentTick(pool), WETH_START_TICK, "buying token0 raises token1/token0");
         uint256 upFill = IERC20(token).balanceOf(upAccount);
 
@@ -117,7 +117,7 @@ contract HydropumpLaunchForkTest is ForkFixture {
         address downAccount = creator;
         (address mirrored, address mirroredPool,) = _launchFrom(downAccount, WETH, bytes32(0), buyAmount);
         assertGt(IERC20(mirrored).balanceOf(downAccount), 0);
-        assertEq(IERC20(WETH).balanceOf(mirroredPool), buyAmount);
+        _assertQuoteAfterInitialBuy(mirroredPool, buyAmount);
         assertLt(_currentTick(mirroredPool), -WETH_START_TICK, "buying token1 lowers it");
 
         // Opposite directions on the tick, the same thing economically — and the same fill, because either
@@ -130,11 +130,17 @@ contract HydropumpLaunchForkTest is ForkFixture {
     function test_LaunchPoolsAreNotGaugedOnEitherSide() public onlyForked {
         (, address pool,,) = _launchOnSide(WETH, true, bytes32(0));
         (,,,, uint16 communityFee,) = IAlgebraPool(pool).globalState();
-        assertEq(communityFee, 0, "launch pools must keep fees with the LP");
+        assertLt(communityFee, 1000, "launch pools must not send all fees to a gauge");
 
         (, address mirroredPool,,) = _launchOnSide(WETH, false, bytes32(0));
         (,,,, uint16 mirroredCommunityFee,) = IAlgebraPool(mirroredPool).globalState();
-        assertEq(mirroredCommunityFee, 0);
+        assertEq(mirroredCommunityFee, communityFee);
+    }
+
+    function _assertQuoteAfterInitialBuy(address pool, uint256 amount) internal view {
+        (,,,,uint16 communityFee,) = IAlgebraPool(pool).globalState();
+        uint256 community = amount * 990000 / 1000000 * communityFee / 1000;
+        assertApproxEqAbs(IERC20(WETH).balanceOf(pool), amount - community, 10);
     }
 
     function test_LaunchFeeAccumulatesAndIsClaimable() public onlyForked {

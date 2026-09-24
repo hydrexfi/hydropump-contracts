@@ -18,6 +18,7 @@ import {HydropumpAddresses} from "../../../contracts/libraries/HydropumpAddresse
 import {IAlgebraPool} from "../../../contracts/interfaces/IAlgebraPool.sol";
 import {INonfungiblePositionManager} from "../../../contracts/interfaces/INonfungiblePositionManager.sol";
 import {ISwapRouter} from "../../../contracts/interfaces/ISwapRouter.sol";
+import {LaunchPluginSetup} from "../../helpers/LaunchPluginSetup.sol";
 
 /// @notice The whole stack deployed against live Hydrex on Base, wired exactly as the deploy script wires it.
 /// @dev Requires BASE_RPC_URL; `forked` is false without it and every suite skips, so `forge test` stays
@@ -26,7 +27,7 @@ import {ISwapRouter} from "../../../contracts/interfaces/ISwapRouter.sol";
 ///      Orientation is chosen rather than accepted. Addresses come out of a per-sender counter now, so a
 ///      test that means to exercise one side of the pair launches from a throwaway account until it lands
 ///      there — cheap, and it keeps each case honest about which orientation it is actually testing.
-abstract contract ForkFixture is Test {
+abstract contract ForkFixture is LaunchPluginSetup {
     INonfungiblePositionManager internal constant NPM =
         INonfungiblePositionManager(HydropumpAddresses.NONFUNGIBLE_POSITION_MANAGER);
     ISwapRouter internal constant ROUTER = ISwapRouter(HydropumpAddresses.SWAP_ROUTER);
@@ -119,6 +120,7 @@ abstract contract ForkFixture is Test {
 
         vm.prank(admin);
         launcher.setFeeUseRegistry(address(registry));
+        _deployLaunchPlugin(launcher, admin);
 
         _registerQuote(WETH, WETH_START_TICK);
         _registerQuote(HYDX, HYDX_START_TICK);
@@ -182,7 +184,12 @@ abstract contract ForkFixture is Test {
                 feeUse: feeUse
             })
         );
+        // Existing curve/fee-use suites characterize normal trading after launch.
+        // Dedicated launch-fee tests override this to exercise the initial window.
+        if (_waitForNormalFees()) vm.roll(block.number + 10);
     }
+
+    function _waitForNormalFees() internal pure virtual returns (bool) { return true; }
 
     function _launchOnSide(address quoteToken, bool wantToken0, bytes32 feeUse)
         internal
@@ -206,7 +213,7 @@ abstract contract ForkFixture is Test {
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: tokenIn,
                 tokenOut: tokenOut,
-                deployer: address(0),
+                deployer: launcher.poolDeployer(),
                 recipient: who,
                 deadline: block.timestamp,
                 amountIn: amountIn,
@@ -225,7 +232,7 @@ abstract contract ForkFixture is Test {
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: tokenIn,
                 tokenOut: tokenOut,
-                deployer: address(0),
+                deployer: launcher.poolDeployer(),
                 recipient: who,
                 deadline: block.timestamp,
                 amountIn: amountIn,

@@ -94,6 +94,8 @@ contract MockAlgebra {
     uint256 public nextId = 1;
     mapping(bytes32 pair => address) public pools;
     mapping(uint256 id => Position) internal _positions;
+    mapping(uint256 id => address) public positionDeployers;
+    function setPositionDeployer(uint256 id, address deployer) external { positionDeployers[id] = deployer; }
 
     // Optional caps simulate a ratio-limited partial fill. Real liquidity math is covered on fork.
     uint256 public usageCap0;
@@ -134,7 +136,10 @@ contract MockAlgebra {
         if (token0 >= token1) revert Unsorted();
 
         pool = poolFor(token0, token1);
-        if (pool != address(0)) return pool;
+        if (pool != address(0)) {
+            if (MockAlgebraPool(pool).price() == 0) MockAlgebraPool(pool).setPrice(sqrtPriceX96);
+            return pool;
+        }
 
         pool = address(new MockAlgebraPool());
         MockAlgebraPool(pool).init(token0, token1, nextTickSpacing, sqrtPriceX96);
@@ -177,6 +182,7 @@ contract MockAlgebra {
         liquidity = uint128((amount0 + amount1) >> 32);
 
         tokenId = nextId++;
+        positionDeployers[tokenId] = params.deployer;
         _positions[tokenId] = Position({
             token0: params.token0,
             token1: params.token1,
@@ -258,7 +264,7 @@ contract MockAlgebra {
             address(0),
             position.token0,
             position.token1,
-            address(0),
+            positionDeployers[tokenId],
             position.tickLower,
             position.tickUpper,
             position.liquidity,
@@ -294,6 +300,7 @@ interface IMockPoolPayer {
 ///      price real swaps — but pricing off spot rather than a constant is what makes a TWAP bound testable:
 ///      a test can shove spot away from the time-weighted tick and watch the bound reject the fill.
 contract MockSwapRouter {
+    address public lastDeployer;
     MockAlgebra public immutable manager;
 
     /// @notice Fee taken off the fill, in hundredths of a bip.
@@ -314,6 +321,7 @@ contract MockSwapRouter {
         external
         returns (uint256 amountOut)
     {
+        lastDeployer = params.deployer;
         (address token0, address token1) =
             params.tokenIn < params.tokenOut ? (params.tokenIn, params.tokenOut) : (params.tokenOut, params.tokenIn);
 

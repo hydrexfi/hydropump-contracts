@@ -115,7 +115,7 @@ contract SeedLaunches is Script {
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: tokenIn,
                 tokenOut: tokenOut,
-                deployer: address(0),
+                deployer: launcher.poolDeployer(),
                 recipient: to,
                 deadline: block.timestamp + 600,
                 amountIn: amountIn,

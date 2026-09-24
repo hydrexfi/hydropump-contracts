@@ -143,5 +143,7 @@ contract DeployHydropump is Script {
         console2.log("\nSet LAUNCHER_ADDRESS and PAIR_DIRECTORY_ADDRESS in .env, then:");
         console2.log("  npm run quotes:build && npm run quotes:register:base");
         console2.log("From the Safe: accept the locker and registry ownership transfers (Ownable2Step).");
+        console2.log("Launches stay disabled until the dedicated plugin deployer is deployed, granted CUSTOM_POOL_DEPLOYER, and bound by the admin.");
+        console2.log("See contracts/plugins/README.md for the plugin deployment stage.");
     }
 }

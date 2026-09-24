@@ -16,6 +16,7 @@ import {IAlgebraPool} from "../interfaces/IAlgebraPool.sol";
 import {ISwapRouter} from "../interfaces/ISwapRouter.sol";
 import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
 import {TickMath} from "../libraries/TickMath.sol";
+import {IHydropumpPoolDeployer} from "../interfaces/IHydropumpPoolDeployer.sol";
 
 /// @title HydropumpLauncher
 /// @notice Clones an ERC20, opens its pool against a whitelisted quote token, seeds single-sided liquidity
@@ -44,9 +45,11 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     address public admin;
     address public pairDirectory;
     address public feeUseRegistry;
+    /// @notice Dedicated Algebra namespace for new launch pools.
+    address public poolDeployer;
 
     /// @dev Reserved so added storage does not shift the layout. Keep vars + gap == 50.
-    uint256[46] private __gap;
+    uint256[45] private __gap;
 
     event Launched(
         address indexed token,
@@ -76,6 +79,11 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     error QuoteConsumed();
     error BandOutOfRange();
     error DirectoryUnset();
+    error PoolDeployerNotConfigured();
+    error InvalidPoolDeployer();
+    error PoolDeployerAlreadyConfigured();
+
+    event PoolDeployerConfigured(address indexed deployer);
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -171,6 +179,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
 
         address directory = pairDirectory;
         if (directory == address(0)) revert DirectoryUnset();
+        if (poolDeployer == address(0)) revert PoolDeployerNotConfigured();
 
         token = address(new HydropumpToken(params.name, params.symbol, SUPPLY));
 
@@ -179,10 +188,12 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
 
         (address token0, address token1) = isToken0 ? (token, params.quoteToken) : (params.quoteToken, token);
 
+        // The Position Manager can initialize custom pools, but cannot create them.
+        address createdPool = IHydropumpPoolDeployer(poolDeployer).createPool(token0, token1);
         pool = nonfungiblePositionManager.createAndInitializePoolIfNecessary(
-            token0, token1, address(0), TickMath.getSqrtRatioAtTick(startTick), ""
+            token0, token1, poolDeployer, TickMath.getSqrtRatioAtTick(startTick), ""
         );
-        if (pool == address(0)) revert PoolCreationFailed();
+        if (pool == address(0) || pool != createdPool) revert PoolCreationFailed();
 
         positionIds = _mintBands(token, params.quoteToken, pool, startTick, isToken0);
 
@@ -228,7 +239,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
             ISwapRouter.ExactInputSingleParams({
                 tokenIn: quoteToken,
                 tokenOut: token,
-                deployer: address(0),
+                deployer: poolDeployer,
                 recipient: msg.sender,
                 deadline: block.timestamp,
                 amountIn: buyAmount,
@@ -286,7 +297,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
                 INonfungiblePositionManager.MintParams({
                     token0: token0,
                     token1: token1,
-                    deployer: address(0),
+                    deployer: poolDeployer,
                     tickLower: tickLower,
                     tickUpper: tickUpper,
                     amount0Desired: isToken0 ? amount : 0,
@@ -365,5 +376,18 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     function setFeeUseRegistry(address newRegistry) external onlyAdmin {
         emit FeeUseRegistryUpdated(feeUseRegistry, newRegistry);
         feeUseRegistry = newRegistry;
+    }
+
+    /// @notice Bind the dedicated factory once before enabling launches.
+    /// @dev Requires matching launcher/factory identities; preserves one namespace.
+    function setPoolDeployer(address deployer) external onlyAdmin {
+        if (poolDeployer != address(0)) revert PoolDeployerAlreadyConfigured();
+        if (deployer.code.length == 0) revert InvalidPoolDeployer();
+        IHydropumpPoolDeployer target = IHydropumpPoolDeployer(deployer);
+        if (target.launcher() != address(this) || target.algebraFactory() != HydropumpAddresses.ALGEBRA_FACTORY) {
+            revert InvalidPoolDeployer();
+        }
+        poolDeployer = deployer;
+        emit PoolDeployerConfigured(deployer);
     }
 }

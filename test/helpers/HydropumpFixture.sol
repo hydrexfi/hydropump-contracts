@@ -17,6 +17,7 @@ import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.s
 import {TickMath} from "../../contracts/libraries/TickMath.sol";
 import {MockAlgebra, MockAlgebraPool, MockSwapRouter} from "../mocks/MockAlgebra.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
+import {MockLaunchPoolDeployer} from "../mocks/MockLaunchPoolDeployer.sol";
 
 /// @notice The whole stack, wired the way the deploy script wires it, against a stand-in Algebra.
 /// @dev Every suite inherits this rather than repeating the wiring, so a change to how the pieces reference
@@ -116,6 +117,9 @@ abstract contract HydropumpFixture is Test {
 
         vm.prank(admin);
         launcher.setFeeUseRegistry(address(registry));
+        address poolDeployer = address(new MockLaunchPoolDeployer(address(launcher)));
+        vm.prank(admin);
+        launcher.setPoolDeployer(poolDeployer);
 
         _deployQuote(LOW_QUOTE);
         _deployQuote(HIGH_QUOTE);
