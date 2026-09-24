@@ -20,3 +20,4 @@
 14:48  DONE  CI green on final pushed commit dff2847 (run 36001028514): build/sizes/format, storage-layout-snapshots, unit tests all pass — done-check criteria satisfied, no further pushes planned
 14:49  NOTE  done-check veto 1
 14:50  NOTE  done-check refused: local commit unpushed, and bare HP-07/HP-20 labels in report + PR body (plain name must precede bracketed label). Fixed report wording, updated PR body via gh pr edit, pushing now.
+14:55  DONE  done-check fixes applied and pushed (0d16d7d): branch pushed, bare HP-07/HP-20 labels reworded in report and PR body; CI green (run 36001633241)
