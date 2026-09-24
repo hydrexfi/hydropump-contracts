@@ -110,6 +110,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     error InvalidFeeSplit();
     error RegistryUnset();
     error UnknownFeeUse();
+    error InvalidCreatorRecipient();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -181,6 +182,11 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
                               USER WRITE
     //////////////////////////////////////////////////////////////*/
 
+    /// @notice Register a new launch and lock its positions.
+    /// @dev Precondition: `_creatorRecipient` is neither this contract nor `feeUseRegistry`. Either would
+    ///      pay a `spendCreatorShare` transfer back to this contract, whose balance-delta re-book credits
+    ///      it straight back to `creatorOwed`, and only the recipient can call `setCreatorRecipient` — so
+    ///      the share could never leave.
     function registerLaunch(
         address token,
         address quoteToken,
@@ -192,6 +198,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         if (msg.sender != launcher) revert NotLauncher();
         if (_launches[token].pool != address(0)) revert AlreadyRegistered();
         if (_creatorRecipient == address(0)) revert ZeroAddress();
+        _requirePayableRecipient(_creatorRecipient);
         if (positionIds.length == 0 || positionIds.length > MAX_POSITIONS) revert InvalidPositionCount();
 
         Launch storage launch = _launches[token];
@@ -421,13 +428,23 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         emit ProtocolSwept(recipient, asset, amount);
     }
 
+    /// @dev Precondition: same as `registerLaunch` — `newRecipient` is neither this contract nor
+    ///      `feeUseRegistry`, for the same reason.
     function setCreatorRecipient(address token, address newRecipient) external {
         Launch storage launch = _launches[token];
         if (msg.sender != launch.creatorRecipient) revert NotCreatorRecipient();
         if (newRecipient == address(0)) revert ZeroAddress();
+        _requirePayableRecipient(newRecipient);
 
         emit CreatorRecipientUpdated(token, launch.creatorRecipient, newRecipient);
         launch.creatorRecipient = newRecipient;
+    }
+
+    /// @dev Rejects a recipient that could never actually receive its share: the locker itself, or the
+    ///      fee-use registry it spends through. Fee-use implementations are not covered — the registry has
+    ///      no reverse lookup from implementation to id, and adding one is a design change out of scope here.
+    function _requirePayableRecipient(address recipient) internal view {
+        if (recipient == address(this) || recipient == feeUseRegistry) revert InvalidCreatorRecipient();
     }
 
     function onERC721Received(address, address, uint256, bytes calldata) external view override returns (bytes4) {
