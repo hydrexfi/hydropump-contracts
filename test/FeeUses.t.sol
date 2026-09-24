@@ -243,12 +243,11 @@ contract FeeUsesTest is HydropumpFixture {
         assertEq(IERC20(token).totalSupply(), supplyBefore - 30_000e18);
     }
 
-    /// No price bound, deliberately: the caller takes none of the output — every token bought is burned —
-    /// so a bad fill costs the burn size and nothing else, and the call can never be stuck behind one.
+    /// A price that moved in earlier blocks is the market, so the buy still goes through.
     function test_BuybackBurnFillsWhateverThePoolGives() public {
         (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
 
-        // Spot shoved a long way against the buy. It still goes through.
+        // Spot shoved a long way against the buy before this block. It still goes through.
         int24 shoved = _currentTick(pool) + (token < _quote() ? int24(40_000) : int24(-40_000));
         MockAlgebraPool(pool).setPrice(TickMath.getSqrtRatioAtTick(shoved));
 
@@ -256,6 +255,69 @@ contract FeeUsesTest is HydropumpFixture {
         locker.spendCreatorShare(token);
         assertGt(buybackBurn.lifetimeBurned(token), 0);
         assertLt(IERC20(token).totalSupply(), supplyBefore);
+    }
+
+    /// Pushed past the buffer earlier in the block, nothing is bought and the quote is rebooked.
+    function test_BuybackBurnBuysNothingOnceTheBlockMovedPastTheBuffer() public {
+        (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
+        uint256 owed = locker.creatorOwed(token, _quote());
+
+        _moveSpotThisBlock(pool, _currentTick(pool) + _launchPriceOffset(token, 600));
+
+        vm.prank(stranger);
+        locker.spendCreatorShare(token);
+
+        assertEq(buybackBurn.lifetimeBurned(token), 0, "nothing bought into the push");
+        assertEq(locker.creatorOwed(token, _quote()), owed, "the quote is booked back");
+        _assertNothingHeld(address(buybackBurn), token);
+    }
+
+    /// Pushed part of the way, the buy stops at the buffer and the rest is rebooked.
+    function test_BuybackBurnStopsFivePercentAboveTheBlockOpen() public {
+        (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
+        uint256 owed = locker.creatorOwed(token, _quote());
+
+        int24 open = _currentTick(pool);
+        _moveSpotThisBlock(pool, open + _launchPriceOffset(token, 300));
+
+        locker.spendCreatorShare(token);
+
+        uint256 left = locker.creatorOwed(token, _quote());
+        assertGt(buybackBurn.lifetimeBurned(token), 0, "the room left under the buffer was used");
+        assertGt(left, 0, "the rest is booked back");
+        assertLt(left, owed);
+        assertEq(_currentTick(pool), open + _launchPriceOffset(token, 513), "stopped at the buffer");
+        _assertNothingHeld(address(buybackBurn), token);
+    }
+
+    /// Quote donated to the fee use neither blocks a buy nor gets rebooked to the creator.
+    function test_BuybackBurnIgnoresQuoteDonatedToIt() public {
+        (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
+        uint256 owed = locker.creatorOwed(token, _quote());
+        MockERC20(_quote()).mint(address(buybackBurn), 1);
+
+        _moveSpotThisBlock(pool, _currentTick(pool) + _launchPriceOffset(token, 300));
+        locker.spendCreatorShare(token);
+
+        uint256 left = locker.creatorOwed(token, _quote());
+        assertGt(left, 0, "a partial fill still books its remainder");
+        assertLt(left, owed);
+        assertEq(IERC20(_quote()).balanceOf(address(buybackBurn)), 1, "the donation stays where it was sent");
+    }
+
+    /// Without a usable block-open price the buy is skipped and the quote rebooked, never reverted.
+    function test_BuybackBurnSkipsWithoutAUsableOracle() public {
+        (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
+        uint256 owed = locker.creatorOwed(token, _quote());
+
+        address[3] memory plugins = [address(0), _quote(), pool];
+        uint16[3] memory configs = [uint16(1), 1, 0];
+        for (uint256 i = 0; i < 3; i++) {
+            MockAlgebraPool(pool).setPlugin(plugins[i], configs[i]);
+            locker.spendCreatorShare(token);
+            assertEq(buybackBurn.lifetimeBurned(token), 0);
+            assertEq(locker.creatorOwed(token, _quote()), owed, "the quote is booked back");
+        }
     }
 
     function test_OnlyTheEscrowCanDeliverToBuybackBurn() public {
