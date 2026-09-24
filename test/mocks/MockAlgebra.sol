@@ -95,7 +95,10 @@ contract MockAlgebra {
     mapping(bytes32 pair => address) public pools;
     mapping(uint256 id => Position) internal _positions;
     mapping(uint256 id => address) public positionDeployers;
-    function setPositionDeployer(uint256 id, address deployer) external { positionDeployers[id] = deployer; }
+
+    function setPositionDeployer(uint256 id, address deployer) external {
+        positionDeployers[id] = deployer;
+    }
 
     // Optional caps simulate a ratio-limited partial fill. Real liquidity math is covered on fork.
     uint256 public usageCap0;
@@ -317,10 +320,7 @@ contract MockSwapRouter {
         (feePips, bump) = (_feePips, _bump);
     }
 
-    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params)
-        external
-        returns (uint256 amountOut)
-    {
+    function exactInputSingle(ISwapRouter.ExactInputSingleParams calldata params) external returns (uint256 amountOut) {
         lastDeployer = params.deployer;
         (address token0, address token1) =
             params.tokenIn < params.tokenOut ? (params.tokenIn, params.tokenOut) : (params.tokenOut, params.tokenIn);

@@ -189,7 +189,9 @@ abstract contract ForkFixture is LaunchPluginSetup {
         if (_waitForNormalFees()) vm.roll(block.number + 10);
     }
 
-    function _waitForNormalFees() internal pure virtual returns (bool) { return true; }
+    function _waitForNormalFees() internal pure virtual returns (bool) {
+        return true;
+    }
 
     function _launchOnSide(address quoteToken, bool wantToken0, bytes32 feeUse)
         internal

@@ -182,14 +182,12 @@ contract LaunchFeeFlowForkTest is ForkFixture {
         vm.expectRevert(bytes4(keccak256("OnlyLauncher()")));
         IHydropumpPoolDeployer(deployer).createPool(address(1), WETH);
         vm.expectRevert(bytes4(keccak256("InvalidCallback()")));
-        ILaunchFactorySettings(deployer).beforeCreatePoolHook(
-            address(1), address(launcher), deployer, address(2), WETH, ""
-        );
+        ILaunchFactorySettings(deployer)
+            .beforeCreatePoolHook(address(1), address(launcher), deployer, address(2), WETH, "");
         vm.prank(address(FACTORY));
         vm.expectRevert(bytes4(keccak256("InvalidCallback()")));
-        ILaunchFactorySettings(deployer).beforeCreatePoolHook(
-            address(1), address(launcher), deployer, address(2), WETH, ""
-        );
+        ILaunchFactorySettings(deployer)
+            .beforeCreatePoolHook(address(1), address(launcher), deployer, address(2), WETH, "");
         vm.expectRevert(bytes4(keccak256("ExistingPoolNotSupported()")));
         ILaunchFactorySettings(deployer).createPluginForExistingPool(address(2), WETH);
     }

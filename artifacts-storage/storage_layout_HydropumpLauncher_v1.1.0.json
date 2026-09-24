@@ -1,0 +1,83 @@
+{
+  "storage": [
+    {
+      "astId": 74,
+      "contract": "contracts/core/HydropumpLauncher.sol:HydropumpLauncher",
+      "label": "locker",
+      "offset": 0,
+      "slot": "0",
+      "type": "t_address"
+    },
+    {
+      "astId": 76,
+      "contract": "contracts/core/HydropumpLauncher.sol:HydropumpLauncher",
+      "label": "launchFee",
+      "offset": 20,
+      "slot": "0",
+      "type": "t_uint96"
+    },
+    {
+      "astId": 78,
+      "contract": "contracts/core/HydropumpLauncher.sol:HydropumpLauncher",
+      "label": "admin",
+      "offset": 0,
+      "slot": "1",
+      "type": "t_address"
+    },
+    {
+      "astId": 80,
+      "contract": "contracts/core/HydropumpLauncher.sol:HydropumpLauncher",
+      "label": "pairDirectory",
+      "offset": 0,
+      "slot": "2",
+      "type": "t_address"
+    },
+    {
+      "astId": 82,
+      "contract": "contracts/core/HydropumpLauncher.sol:HydropumpLauncher",
+      "label": "feeUseRegistry",
+      "offset": 0,
+      "slot": "3",
+      "type": "t_address"
+    },
+    {
+      "astId": 85,
+      "contract": "contracts/core/HydropumpLauncher.sol:HydropumpLauncher",
+      "label": "poolDeployer",
+      "offset": 0,
+      "slot": "4",
+      "type": "t_address"
+    },
+    {
+      "astId": 90,
+      "contract": "contracts/core/HydropumpLauncher.sol:HydropumpLauncher",
+      "label": "__gap",
+      "offset": 0,
+      "slot": "5",
+      "type": "t_array(t_uint256)45_storage"
+    }
+  ],
+  "types": {
+    "t_address": {
+      "encoding": "inplace",
+      "label": "address",
+      "numberOfBytes": "20"
+    },
+    "t_array(t_uint256)45_storage": {
+      "encoding": "inplace",
+      "label": "uint256[45]",
+      "numberOfBytes": "1440",
+      "base": "t_uint256"
+    },
+    "t_uint256": {
+      "encoding": "inplace",
+      "label": "uint256",
+      "numberOfBytes": "32"
+    },
+    "t_uint96": {
+      "encoding": "inplace",
+      "label": "uint96",
+      "numberOfBytes": "12"
+    }
+  }
+}

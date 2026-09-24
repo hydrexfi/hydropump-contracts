@@ -48,8 +48,10 @@ contract BuybackForkTest is Test {
         buyback = new HydropumpBuyback(admin, operator, address(HYDX), GAUGE_BRIBE);
     }
 
-    function test_GaugeBribeAcceptsHydx() public view {
-        if (!forked) return;
+    function test_GaugeBribeAcceptsHydx() public {
+        if (!forked) {
+            vm.skip(true);
+        }
 
         assertEq(IBribeView(GAUGE_BRIBE).TYPE(), "Hydrex Bribes: vAMM-HPONE/HPTWO");
         assertTrue(IBribeView(GAUGE_BRIBE).isRewardToken(address(HYDX)), "HYDX must be a reward token");

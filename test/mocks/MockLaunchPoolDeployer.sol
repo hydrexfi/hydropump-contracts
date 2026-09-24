@@ -15,8 +15,7 @@ contract MockLaunchPoolDeployer {
 
     function createPool(address token0, address token1) external returns (address) {
         require(msg.sender == launcher, "only launcher");
-        return MockAlgebra(HydropumpAddresses.NONFUNGIBLE_POSITION_MANAGER).createAndInitializePoolIfNecessary(
-            token0, token1, address(this), 0, ""
-        );
+        return MockAlgebra(HydropumpAddresses.NONFUNGIBLE_POSITION_MANAGER)
+            .createAndInitializePoolIfNecessary(token0, token1, address(this), 0, "");
     }
 }
