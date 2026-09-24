@@ -7,6 +7,7 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 import {IHydropumpLocker} from "../interfaces/IHydropumpLocker.sol";
 import {IFeeUseRegistry} from "../interfaces/IFeeUseRegistry.sol";
@@ -17,7 +18,19 @@ import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
 
 /// @title HydropumpLocker
 /// @notice Holds every launch's positions permanently and splits the fees they earn.
-contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradeable, IERC721Receiver, IHydropumpLocker {
+/// @dev Every entry point that moves tokens or changes `creatorOwed` / `protocolOwed` is `nonReentrant`,
+///      so at most one of them runs at a time. `spendCreatorShare` depends on that: it infers what a fee
+///      use handed back from how much the locker's balance rose while the fee use ran, and any other
+///      launch's fees arriving inside that window would be booked twice. The guard keeps its flag in
+///      transient storage, so it takes no storage slot and the layout is unchanged.
+contract HydropumpLocker is
+    Initializable,
+    Ownable2StepUpgradeable,
+    UUPSUpgradeable,
+    ReentrancyGuardTransient,
+    IERC721Receiver,
+    IHydropumpLocker
+{
     using SafeERC20 for IERC20;
 
     INonfungiblePositionManager public constant nonfungiblePositionManager =
@@ -110,6 +123,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     error InvalidFeeSplit();
     error RegistryUnset();
     error UnknownFeeUse();
+    error NotSelf();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -206,8 +220,8 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     }
 
     /// @notice Sweep every band and book both shares. Permissionless; destinations fixed.
-    function splitRewards(address token) external returns (uint256 toCreator, uint256 toProtocol) {
-        return splitRewards(token, fullMask(token));
+    function splitRewards(address token) external nonReentrant returns (uint256 toCreator, uint256 toProtocol) {
+        return _splitRewards(token, fullMask(token));
     }
 
     /// @notice `splitRewards` over a chosen set of bands.
@@ -216,7 +230,20 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     /// @dev Books both shares and moves nothing out. Every creator's money flows through here, so it
     ///      must never be able to fail: it touches no pool, no swap and no third-party contract. Spending
     ///      is `spendCreatorShare` and `convertProtocolShare`, which may fail freely.
-    function splitRewards(address token, uint256 positionMask) public returns (uint256 toCreator, uint256 toProtocol) {
+    function splitRewards(address token, uint256 positionMask)
+        public
+        nonReentrant
+        returns (uint256 toCreator, uint256 toProtocol)
+    {
+        return _splitRewards(token, positionMask);
+    }
+
+    /// @dev The body of both `splitRewards` overloads, so the entry points above and the combined entry
+    ///      points below take the guard once rather than nesting it.
+    function _splitRewards(address token, uint256 positionMask)
+        internal
+        returns (uint256 toCreator, uint256 toProtocol)
+    {
         Launch storage launch = _launches[token];
         address quoteToken = launch.quoteToken;
         if (launch.pool == address(0)) revert UnknownLaunch();
@@ -277,7 +304,23 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     ///         Permissionless; the destination was fixed at launch.
     /// @dev Separate from the split so a fee use that reverts cannot stop fees being collected. If it
     ///      does revert, the share stays booked here until the registry is repointed.
-    function spendCreatorShare(address token) public returns (uint256 launchTokenAmount, uint256 quoteAmount) {
+    ///
+    ///      Invariant this relies on: no locker entry point can run while another is in progress. The
+    ///      re-book below reads the balance rise across `onFees` and credits all of it to `token`, which
+    ///      is only that launch's money if nothing else could have paid the locker in the meantime. The
+    ///      `nonReentrant` on every entry point that moves tokens or touches `creatorOwed` /
+    ///      `protocolOwed` is what makes that true — a fee use, or a quote token's transfer hook, calling
+    ///      back into `splitRewards` for another launch is refused rather than double-booked.
+    function spendCreatorShare(address token)
+        public
+        nonReentrant
+        returns (uint256 launchTokenAmount, uint256 quoteAmount)
+    {
+        return _spendCreatorShare(token);
+    }
+
+    /// @dev The body of `spendCreatorShare`, so the combined entry points take the guard once.
+    function _spendCreatorShare(address token) internal returns (uint256 launchTokenAmount, uint256 quoteAmount) {
         address registry = feeUseRegistry;
         if (registry == address(0)) revert RegistryUnset();
 
@@ -312,7 +355,9 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
 
         // A fee use returns what it could not use — auto-LP does this on nearly every call, since a band
         // takes one ratio. Re-booking it keeps it payable instead of leaving it loose in this contract,
-        // where no ledger would ever pay it out.
+        // where no ledger would ever pay it out. What the balance rose by is this fee use's return and
+        // nothing else only because the guard held for the whole call: without it, another launch's fees
+        // collected mid-call would be booked to that launch and credited here a second time.
         _rebook(token, token, IERC20(token).balanceOf(address(this)) - heldLaunchToken);
         _rebook(token, quoteToken, IERC20(quoteToken).balanceOf(address(this)) - heldQuote);
 
@@ -333,18 +378,22 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     /// @notice Collect, then spend the creator's share on whatever the launch chose.
     /// @dev Permissionless and unpointable: the destination was fixed at launch, so "claim", "buy back
     ///      and burn" and "auto-LP" are all this call under three labels.
-    function handleCreatorRewards(address token) external returns (uint256 launchTokenAmount, uint256 quoteAmount) {
-        splitRewards(token, fullMask(token));
-        return spendCreatorShare(token);
+    function handleCreatorRewards(address token)
+        external
+        nonReentrant
+        returns (uint256 launchTokenAmount, uint256 quoteAmount)
+    {
+        _splitRewards(token, fullMask(token));
+        return _spendCreatorShare(token);
     }
 
     /// @notice Collect, then turn the protocol's share into the pair asset and send it to the buyback.
     /// @dev Permissionless; the recipient is fixed. Reverts if the pool cannot fill the sell, because a
     ///      caller asking for exactly this should hear about it — `handleAllRewards` is where it is
     ///      best-effort instead.
-    function handleProtocolRewards(address token) external returns (uint256 delivered) {
-        splitRewards(token, fullMask(token));
-        return this.deliverProtocolShare(token);
+    function handleProtocolRewards(address token) external nonReentrant returns (uint256 delivered) {
+        _splitRewards(token, fullMask(token));
+        return _deliverProtocolShare(token);
     }
 
     /// @notice Both sides in one transaction. What the frontend button calls.
@@ -354,16 +403,32 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     ///
     ///      Send this with a generous gas limit. The `try` succeeds whether or not its body runs, so gas
     ///      estimation can settle on a limit that starves it — observed on mainnet.
-    function handleAllRewards(address token) external returns (uint256 toCreator, uint256 toProtocol) {
-        (toCreator, toProtocol) = splitRewards(token, fullMask(token));
-        spendCreatorShare(token);
+    function handleAllRewards(address token) external nonReentrant returns (uint256 toCreator, uint256 toProtocol) {
+        (toCreator, toProtocol) = _splitRewards(token, fullMask(token));
+        _spendCreatorShare(token);
 
-        try this.deliverProtocolShare(token) {} catch {}
+        try this.deliverProtocolShareFromSelf(token) {} catch {}
     }
 
     /// @notice Convert the protocol's launch-token share and deliver the quote to the buyback.
-    /// @dev External so `handleAllRewards` can call it best-effort. Does not collect; the entry points do.
-    function deliverProtocolShare(address token) external returns (uint256 delivered) {
+    /// @dev Does not collect; the entry points do.
+    function deliverProtocolShare(address token) external nonReentrant returns (uint256 delivered) {
+        return _deliverProtocolShare(token);
+    }
+
+    /// @notice The same delivery, callable only by this contract.
+    /// @dev `handleAllRewards` makes the protocol half best-effort, and `try` needs a real external call to
+    ///      get a frame it can roll back. Calling `deliverProtocolShare` would hit the guard
+    ///      `handleAllRewards` is already holding and be swallowed by the `catch`, silently never
+    ///      delivering — so the self-call goes through this unguarded twin instead. It is not a hole: the
+    ///      only way to reach it is from a `nonReentrant` entry point of this contract, because nothing
+    ///      else can make `msg.sender` this address.
+    function deliverProtocolShareFromSelf(address token) external returns (uint256 delivered) {
+        if (msg.sender != address(this)) revert NotSelf();
+        return _deliverProtocolShare(token);
+    }
+
+    function _deliverProtocolShare(address token) internal returns (uint256 delivered) {
         address quoteToken = _launches[token].quoteToken;
         if (quoteToken == address(0)) revert UnknownLaunch();
 
@@ -380,7 +445,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     ///
     ///      Isolated from `splitRewards` on purpose: this is the part that can fail, and nothing else
     ///      should fail with it.
-    function convertProtocolShare(address token) external returns (uint256 quoteOut) {
+    function convertProtocolShare(address token) external nonReentrant returns (uint256 quoteOut) {
         Launch storage launch = _launches[token];
         if (launch.pool == address(0)) revert UnknownLaunch();
         return _convertProtocolShare(token, launch.quoteToken);
@@ -400,7 +465,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     /// @notice Move the accrued protocol share to the buyback. Permissionless; destination is fixed.
     /// @dev Pulled on the operator's schedule rather than pushed during someone else's split, so the daily
     ///      buyback job and a creator's fees can never block one another.
-    function sweepProtocol(address[] calldata assets) external returns (uint256[] memory amounts) {
+    function sweepProtocol(address[] calldata assets) external nonReentrant returns (uint256[] memory amounts) {
         amounts = new uint256[](assets.length);
         for (uint256 i = 0; i < assets.length; i++) {
             amounts[i] = _sweep(assets[i]);
