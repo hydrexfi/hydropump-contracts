@@ -23,6 +23,10 @@
  *   - astId is deliberately NOT compared. It shifts whenever unrelated code is added earlier
  *     in the file and has no bearing on storage compatibility.
  *
+ * It also fails if any contract under contracts/ that inherits UUPSUpgradeable has no snapshot,
+ * so a new proxied contract cannot go unchecked. That editing or deleting a committed snapshot
+ * is refused is enforced separately, by the storage job in .github/workflows/ci.yml.
+ *
  * A deliberate storage change adds a NEW versioned snapshot file (e.g. _v1.1.0.json), which
  * then becomes the highest version and the comparison target.
  *
@@ -40,6 +44,19 @@ const CONTRACTS_DIR = path.join(REPO_ROOT, 'contracts')
 const SNAPSHOT_RE = /^storage_layout_(.+)_v(\d+\.\d+\.\d+)\.json$/
 
 const onlyContract = process.argv.slice(2).find((a) => !a.startsWith('--'))
+
+/** Every contract under contracts/ that inherits UUPSUpgradeable, i.e. sits behind an upgradeable proxy. */
+function findUpgradeableContracts(dir = CONTRACTS_DIR, found = []) {
+  const re = /\bcontract\s+(\w+)\s+is\s+[^{]*\bUUPSUpgradeable\b/g
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) findUpgradeableContracts(full, found)
+    else if (entry.isFile() && entry.name.endsWith('.sol')) {
+      for (const m of fs.readFileSync(full, 'utf8').matchAll(re)) found.push(m[1])
+    }
+  }
+  return found
+}
 
 /** Locate the .sol file declaring `contract <name>`. */
 function findContractFile(contractName, dir = CONTRACTS_DIR) {
@@ -120,7 +137,8 @@ function check(contractName, snapshotFile, version) {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
   } catch (e) {
-    return { contractName, status: 'error', version, message: `forge inspect failed: ${String(e.message).split('\n')[0]}` }
+    const detail = String(e.stderr || e.message).trim().split('\n').slice(-5).join(' | ')
+    return { contractName, status: 'error', version, message: `forge inspect failed: ${detail}` }
   }
 
   const current = canonical(JSON.parse(raw))
@@ -171,6 +189,16 @@ function main() {
   if (!targets.length) {
     console.error('No storage snapshots found — expected artifacts-storage/storage_layout_<Contract>_v<semver>.json')
     process.exit(1)
+  }
+
+  // A proxied contract with no snapshot would otherwise never be checked at all.
+  if (!onlyContract) {
+    const missing = findUpgradeableContracts().filter((name) => !latest.has(name))
+    if (missing.length) {
+      console.error(`Upgradeable contract(s) with no storage snapshot: ${missing.join(', ')}`)
+      console.error('Add one: forge inspect <path>:<Contract> storage --json > artifacts-storage/storage_layout_<Contract>_v1.0.0.json')
+      process.exit(1)
+    }
   }
 
   targets.sort((a, b) => a[0].localeCompare(b[0]))

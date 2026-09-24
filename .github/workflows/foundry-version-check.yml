@@ -39,7 +39,7 @@ jobs:
           PINNED="$(
             grep -rhA4 'foundry-rs/foundry-toolchain' .github/workflows/ \
               | sed -n 's/.*version:[[:space:]]*\(v\{0,1\}[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' \
-              | sort -u
+              | sort -u || true
           )"
           COUNT="$(printf '%s\n' "$PINNED" | grep -c . || true)"
 

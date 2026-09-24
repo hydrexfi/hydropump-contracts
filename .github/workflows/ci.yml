@@ -68,6 +68,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+          fetch-depth: 0
+      # A snapshot records a layout that is live on chain, so it is only ever added to. Editing or
+      # deleting one would let a layout change pass the check below.
+      - name: Refuse edits to committed snapshots
+        if: github.event_name == 'pull_request'
+        run: |
+          CHANGED="$(git diff --name-only --diff-filter=MDR "origin/${{ github.base_ref }}...HEAD" -- artifacts-storage/)"
+          if [ -n "$CHANGED" ]; then
+            echo "::error::Committed storage snapshots were modified, deleted or renamed: $CHANGED"
+            echo "Add a new versioned snapshot instead (see CLAUDE.md, 'Upgradeable contracts and storage')."
+            exit 1
+          fi
       - uses: actions/setup-node@v7
         with:
           node-version: '22.x'
@@ -100,9 +112,9 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.7.1
-      # ForkFixture quietly skips every fork suite when it cannot fork (some suites vm.skip, some
-      # return early and report a pass). Prove the RPC answers as Base first, so this job can never
-      # go green without having forked.
+      # Without a working RPC every fork suite skips its tests rather than failing, so the run would
+      # still be green. Prove the RPC answers as Base first, so this job can never go green without
+      # having forked.
       - name: Check the RPC is reachable and is Base
         run: |
           CHAIN_ID="$(cast chain-id --rpc-url "$BASE_RPC_URL")"

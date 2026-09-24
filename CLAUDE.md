@@ -19,11 +19,13 @@ Findings labelled `HP-01` … `HP-23` refer to the internal security review of 2
 | Format check | `npm run fmt:check` (fix with `forge fmt`) |
 | Storage layouts | `npm run check:storage-snapshots` |
 
-CI (`.github/workflows/ci.yml`) runs all of these as separate jobs on every PR.
+CI (`.github/workflows/ci.yml`) runs all of these except install on every PR, in four jobs.
 
-**Fork tests skip silently without an RPC.** `ForkFixture` returns early when `BASE_RPC_URL` is unset,
-and some suites then report a pass. Foundry loads `.env` automatically; `.env.example` has the public
-endpoint. Before trusting a fork result, check `cast chain-id --rpc-url "$BASE_RPC_URL"` prints `8453`.
+**Fork tests do not fail without an RPC.** When `BASE_RPC_URL` is unset, every fork suite marks its
+tests skipped (`vm.skip`), so a run can finish green having tested nothing. Each suite has its own guard;
+five of the nine share `test/fork/helpers/ForkFixture.sol`. Foundry loads `.env` automatically, and
+`.env.example` has the public endpoint. Before trusting a fork result, check that
+`cast chain-id --rpc-url "$BASE_RPC_URL"` prints `8453` and that the summary shows no skipped tests.
 
 ## Upgradeable contracts and storage
 

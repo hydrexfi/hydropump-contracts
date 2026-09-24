@@ -33,9 +33,9 @@ rule working. Log it and move on; do not reason your way past it.
    ```
    And `npm run test:fork` before any commit that changes `contracts/`.
 
-2. **A fork test that did not fork proves nothing.** Fork suites skip, or pass silently, without an RPC.
-   Before relying on a fork result, check `cast chain-id --rpc-url "$BASE_RPC_URL"` prints `8453`, and
-   log that you checked.
+2. **A fork test that did not fork proves nothing.** Without an RPC every fork suite skips its tests, and
+   the run still finishes green. Before relying on a fork result, check `cast chain-id --rpc-url
+   "$BASE_RPC_URL"` prints `8453` and the summary shows 0 skipped, and log that you checked.
 
 3. **Fail, fix, pass — and log all three.** The new test must fail on the unfixed code. Log the failing
    output's key line before you change the contract. A test that would pass against a no-op is not a test.
@@ -49,7 +49,11 @@ rule working. Log it and move on; do not reason your way past it.
 6. **Every negative claim names where it looked.** Before writing "there is no other caller" or "nothing
    else uses this", list the searches you ran.
 
-7. **`~/engagements/` is read-only.** Proof-of-concept tests from the security review live there; copy
+7. **A wrong load-bearing document is corrected, not worked around.** If `README.md`, `CLAUDE.md`, this
+   file or NatSpec a fix relies on is wrong, correct it in its own commit, keep going, and say so loudly
+   in the report. This is not a hard stop.
+
+8. **`~/engagements/` is read-only.** Proof-of-concept tests from the security review live there; copy
    and adapt them into `test/`, never edit them in place.
 
 ---
@@ -89,6 +93,4 @@ Write for a reviewer who has not seen the work order: the claim first in plain w
 
 - A queue item would need model spend, a write outside this worktree, a merge, or a chain transaction.
 - A test fails that you did not cause and cannot explain.
-- A committed, load-bearing document is wrong (`README.md`, `CLAUDE.md`, this file, NatSpec a fix relies
-  on): correct it, commit, keep going, and say so loudly in the report.
 - Two consecutive queue items park without progress.
