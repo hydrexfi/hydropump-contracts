@@ -11,8 +11,20 @@ import {IAlgebraPool} from "../../contracts/interfaces/IAlgebraPool.sol";
 import {FeeUses} from "../../contracts/libraries/FeeUses.sol";
 import {ForkFixture} from "./helpers/ForkFixture.sol";
 
+/// @dev Algebra Integral pools expose where their community fee goes; the repo's IAlgebraPool does not need it.
+interface IAlgebraPoolCommunityVault {
+    function communityVault() external view returns (address);
+}
+
 /// @notice A full launch against the live Hydrex deployment on Base, on both sides of the pair.
 contract HydropumpLaunchForkTest is ForkFixture {
+    /// @dev Algebra's share of every swap fee on a launch pool, in Algebra's per-mille units (1000 = all of it).
+    ///      Hydrex sets it as the factory default (`setDefaultCommunityFee(15)`, block 51,695,670), so a
+    ///      pre-gauge Hydropump pool pays Algebra its 1.5% at the pool, and the locked positions keep the rest.
+    ///      A gauged pool instead runs at 1000 and pays Algebra at the fee splitter.
+    uint16 internal constant ALGEBRA_COMMUNITY_FEE = 15;
+    uint16 internal constant GAUGED_COMMUNITY_FEE = 1000;
+
     function test_LaunchSeedsTheCurveAndLocksEveryPositionAsToken0() public onlyForked {
         (address token, address pool, uint256[] memory ids, address account) = _launchOnSide(WETH, true, bytes32(0));
 
@@ -109,7 +121,7 @@ contract HydropumpLaunchForkTest is ForkFixture {
         (address token, address pool,) = _launchFrom(upAccount, WETH, bytes32(0), buyAmount);
         assertGt(IERC20(token).balanceOf(upAccount), 0, "buyer receives tokens");
         assertEq(IERC20(WETH).balanceOf(address(launcher)), 0, "no quote stranded");
-        assertEq(IERC20(WETH).balanceOf(pool), buyAmount, "quote landed in the pool");
+        _assertBuyLandedInPoolOrVault(pool, buyAmount);
         assertGt(_currentTick(pool), WETH_START_TICK, "buying token0 raises token1/token0");
         uint256 upFill = IERC20(token).balanceOf(upAccount);
 
@@ -117,7 +129,7 @@ contract HydropumpLaunchForkTest is ForkFixture {
         address downAccount = creator;
         (address mirrored, address mirroredPool,) = _launchFrom(downAccount, WETH, bytes32(0), buyAmount);
         assertGt(IERC20(mirrored).balanceOf(downAccount), 0);
-        assertEq(IERC20(WETH).balanceOf(mirroredPool), buyAmount);
+        _assertBuyLandedInPoolOrVault(mirroredPool, buyAmount);
         assertLt(_currentTick(mirroredPool), -WETH_START_TICK, "buying token1 lowers it");
 
         // Opposite directions on the tick, the same thing economically — and the same fill, because either
@@ -125,16 +137,18 @@ contract HydropumpLaunchForkTest is ForkFixture {
         assertApproxEqRel(IERC20(mirrored).balanceOf(downAccount), upFill, 0.005e18, "fills must match");
     }
 
-    /// A gauged Hydrex CL pool runs at communityFee 1000/1000, which would send every swap fee to the
-    /// community vault and leave the locked positions — and so every fee use — with nothing.
-    function test_LaunchPoolsAreNotGaugedOnEitherSide() public onlyForked {
+    /// A launch pool pays Algebra its 1.5% and nothing more. A gauged Hydrex CL pool runs at communityFee
+    /// 1000/1000, which would send every swap fee to the community vault and leave the locked positions —
+    /// and so every fee use — with nothing; a launch pool must never open like that.
+    function test_LaunchPoolsPayOnlyAlgebrasCommunityFeeOnEitherSide() public onlyForked {
         (, address pool,,) = _launchOnSide(WETH, true, bytes32(0));
         (,,,, uint16 communityFee,) = IAlgebraPool(pool).globalState();
-        assertEq(communityFee, 0, "launch pools must keep fees with the LP");
+        assertEq(communityFee, ALGEBRA_COMMUNITY_FEE, "launch pools pay Algebra 1.5% and keep the rest with the LP");
+        assertLt(communityFee, GAUGED_COMMUNITY_FEE, "a launch pool must not open as a gauged pool");
 
         (, address mirroredPool,,) = _launchOnSide(WETH, false, bytes32(0));
         (,,,, uint16 mirroredCommunityFee,) = IAlgebraPool(mirroredPool).globalState();
-        assertEq(mirroredCommunityFee, 0);
+        assertEq(mirroredCommunityFee, ALGEBRA_COMMUNITY_FEE);
     }
 
     function test_LaunchFeeAccumulatesAndIsClaimable() public onlyForked {
@@ -166,5 +180,20 @@ contract HydropumpLaunchForkTest is ForkFixture {
 
         assertEq(registry.feeUseOf(token), FeeUses.BUYBACK_BURN);
         assertEq(registry.implementationFor(token), address(buybackBurn));
+    }
+
+    /// @dev The dev buy's quote ends up in the pool, apart from Algebra's community share of the swap fee,
+    ///      which the pool forwards to its community vault. So: some quote left the pool (the fee is charged),
+    ///      no more than Algebra's share of the whole input could have (nothing else takes quote), and the
+    ///      vault holds at least that much. The vault can be shared with other pools, so its balance is only
+    ///      a lower bound, not an exact match.
+    function _assertBuyLandedInPoolOrVault(address pool, uint256 buyAmount) internal view {
+        uint256 inPool = IERC20(WETH).balanceOf(pool);
+        assertLe(inPool, buyAmount, "the pool cannot hold more quote than was bought with");
+        uint256 toCommunity = buyAmount - inPool;
+        assertGt(toCommunity, 0, "Algebra's community share was charged on the buy");
+        assertLe(toCommunity, buyAmount * ALGEBRA_COMMUNITY_FEE / 1000, "only Algebra's share may leave the pool");
+        address vault = IAlgebraPoolCommunityVault(pool).communityVault();
+        assertGe(IERC20(WETH).balanceOf(vault), toCommunity, "what left the pool reached the community vault");
     }
 }

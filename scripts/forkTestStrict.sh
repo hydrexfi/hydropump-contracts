@@ -43,7 +43,8 @@ if [ "$forge_status" -ne 0 ]; then
   exit "$forge_status"
 fi
 
-summary="$(grep -E '^Ran [0-9]+ test suites' "$output_file" | tail -1)"
+# Forge says "test suite" for one suite and "test suites" for several.
+summary="$(grep -E '^Ran [0-9]+ test suites?' "$output_file" | tail -1)"
 if [ -z "$summary" ]; then
   echo "Could not find forge's summary line; refusing to report a pass." >&2
   exit 1
