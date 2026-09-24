@@ -17,3 +17,4 @@
 14:40  DONE  branch pushed — origin/fix/distributor-allocation-total
 14:40  DONE  PR opened — https://github.com/hydrexfi/hydropump-contracts/pull/11, linked with Closes #9
 14:44  DONE  CI green on latest commit (run 36000582226): unit tests, build/sizes/format, storage-layout-snapshots all pass
+14:48  DONE  CI green on final pushed commit dff2847 (run 36001028514): build/sizes/format, storage-layout-snapshots, unit tests all pass — done-check criteria satisfied, no further pushes planned
