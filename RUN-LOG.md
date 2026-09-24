@@ -14,3 +14,5 @@
 14:37  NOTE  done-check waiting: 1 background task running (Review distributor allocation fix diff); not counted as a veto
 14:39  DONE  review — code-reviewer verdict APPROVE WITH NITS, nothing above LOW (one NIT: a trivial/redundant assertLe in test_ReductionBelowLifetimeClaimedReverts); no action required per work order threshold
 14:39  NOTE  COST wall clock 0 h 41 min, $0.00 model spend
+14:40  DONE  branch pushed — origin/fix/distributor-allocation-total
+14:40  DONE  PR opened — https://github.com/hydrexfi/hydropump-contracts/pull/11, linked with Closes #9
