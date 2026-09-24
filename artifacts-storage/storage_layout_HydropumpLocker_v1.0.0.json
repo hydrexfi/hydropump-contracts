@@ -1,0 +1,224 @@
+{
+  "storage": [
+    {
+      "astId": 80,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "launcher",
+      "offset": 0,
+      "slot": "0",
+      "type": "t_address"
+    },
+    {
+      "astId": 82,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "creatorFee",
+      "offset": 20,
+      "slot": "0",
+      "type": "t_uint64"
+    },
+    {
+      "astId": 84,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "feeUseRegistry",
+      "offset": 0,
+      "slot": "1",
+      "type": "t_address"
+    },
+    {
+      "astId": 86,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "protocolFee",
+      "offset": 20,
+      "slot": "1",
+      "type": "t_uint64"
+    },
+    {
+      "astId": 88,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "protocolFeeRecipient",
+      "offset": 0,
+      "slot": "2",
+      "type": "t_address"
+    },
+    {
+      "astId": 93,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "_launches",
+      "offset": 0,
+      "slot": "3",
+      "type": "t_mapping(t_address,t_struct(Launch)78_storage)"
+    },
+    {
+      "astId": 98,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "protocolOwed",
+      "offset": 0,
+      "slot": "4",
+      "type": "t_mapping(t_address,t_uint256)"
+    },
+    {
+      "astId": 104,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "lifetimeFees",
+      "offset": 0,
+      "slot": "5",
+      "type": "t_mapping(t_address,t_struct(FeeTotals)64_storage)"
+    },
+    {
+      "astId": 111,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "creatorOwed",
+      "offset": 0,
+      "slot": "6",
+      "type": "t_mapping(t_address,t_mapping(t_address,t_uint256))"
+    },
+    {
+      "astId": 116,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "__gap",
+      "offset": 0,
+      "slot": "7",
+      "type": "t_array(t_uint256)41_storage"
+    }
+  ],
+  "types": {
+    "t_address": {
+      "encoding": "inplace",
+      "label": "address",
+      "numberOfBytes": "20"
+    },
+    "t_array(t_uint256)41_storage": {
+      "encoding": "inplace",
+      "label": "uint256[41]",
+      "numberOfBytes": "1312",
+      "base": "t_uint256"
+    },
+    "t_array(t_uint256)dyn_storage": {
+      "encoding": "dynamic_array",
+      "label": "uint256[]",
+      "numberOfBytes": "32",
+      "base": "t_uint256"
+    },
+    "t_mapping(t_address,t_mapping(t_address,t_uint256))": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => mapping(address => uint256))",
+      "numberOfBytes": "32",
+      "value": "t_mapping(t_address,t_uint256)"
+    },
+    "t_mapping(t_address,t_struct(FeeTotals)64_storage)": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => struct HydropumpLocker.FeeTotals)",
+      "numberOfBytes": "32",
+      "value": "t_struct(FeeTotals)64_storage"
+    },
+    "t_mapping(t_address,t_struct(Launch)78_storage)": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => struct HydropumpLocker.Launch)",
+      "numberOfBytes": "32",
+      "value": "t_struct(Launch)78_storage"
+    },
+    "t_mapping(t_address,t_uint256)": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => uint256)",
+      "numberOfBytes": "32",
+      "value": "t_uint256"
+    },
+    "t_struct(FeeTotals)64_storage": {
+      "encoding": "inplace",
+      "label": "struct HydropumpLocker.FeeTotals",
+      "numberOfBytes": "32",
+      "members": [
+        {
+          "astId": 61,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "launchToken",
+          "offset": 0,
+          "slot": "0",
+          "type": "t_uint128"
+        },
+        {
+          "astId": 63,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "quote",
+          "offset": 16,
+          "slot": "0",
+          "type": "t_uint128"
+        }
+      ]
+    },
+    "t_struct(Launch)78_storage": {
+      "encoding": "inplace",
+      "label": "struct HydropumpLocker.Launch",
+      "numberOfBytes": "160",
+      "members": [
+        {
+          "astId": 66,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "quoteToken",
+          "offset": 0,
+          "slot": "0",
+          "type": "t_address"
+        },
+        {
+          "astId": 68,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "pool",
+          "offset": 0,
+          "slot": "1",
+          "type": "t_address"
+        },
+        {
+          "astId": 70,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "creator",
+          "offset": 0,
+          "slot": "2",
+          "type": "t_address"
+        },
+        {
+          "astId": 72,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "creatorRecipient",
+          "offset": 0,
+          "slot": "3",
+          "type": "t_address"
+        },
+        {
+          "astId": 74,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "createdAt",
+          "offset": 20,
+          "slot": "3",
+          "type": "t_uint64"
+        },
+        {
+          "astId": 77,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "positionIds",
+          "offset": 0,
+          "slot": "4",
+          "type": "t_array(t_uint256)dyn_storage"
+        }
+      ]
+    },
+    "t_uint128": {
+      "encoding": "inplace",
+      "label": "uint128",
+      "numberOfBytes": "16"
+    },
+    "t_uint256": {
+      "encoding": "inplace",
+      "label": "uint256",
+      "numberOfBytes": "32"
+    },
+    "t_uint64": {
+      "encoding": "inplace",
+      "label": "uint64",
+      "numberOfBytes": "8"
+    }
+  }
+}
