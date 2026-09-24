@@ -220,24 +220,22 @@ contract HydropumpRewardDistributorTest is Test {
         assertEq(hydx.balanceOf(address(distributor)), 100e18, "and no tokens moved");
     }
 
-    /// HP-07: a reduction below what the recipient already claimed must not re-open a payout.
-    /// Adapted from the security review's test_T4H1_7_claimBeforeAReductionKeepsTheOldAmount.
-    function test_ReductionBelowLifetimeClaimedReverts() public {
+    /// HP-07: after a recipient has claimed, "reducing" them to 10 re-opens a payout of 10 that the contract
+    /// does not hold. Adapted from the security review's test_T4H1_7_claimBeforeAReductionKeepsTheOldAmount.
+    function test_ACorrectionAfterAClaimCannotPromiseUnheldTokens() public {
         _one(address(hydx), alice, 100e18);
         vm.prank(alice);
         distributor.claim(address(hydx));
 
         address[] memory recipients = new address[](1);
         uint256[] memory amounts = new uint256[](1);
-        (recipients[0], amounts[0]) = (alice, 10e18); // "reduce" to 10, below the 100 already claimed
+        (recipients[0], amounts[0]) = (alice, 10e18); // an honest owner "reducing" alice from 100 to 10
 
         vm.prank(owner);
-        vm.expectRevert(HydropumpRewardDistributor.AllocationBelowLifetimeClaimed.selector);
+        vm.expectRevert(HydropumpRewardDistributor.AllocationExceedsBalance.selector);
         distributor.setAllocation(address(hydx), recipients, amounts);
 
         assertEq(distributor.claimable(alice, address(hydx)), 0, "the failed call changed nothing");
-        vm.prank(alice);
-        assertEq(distributor.claim(address(hydx)), 0, "nothing left for alice to claim");
         assertLe(
             distributor.totalOwed(address(hydx)),
             hydx.balanceOf(address(distributor)),
@@ -245,15 +243,26 @@ contract HydropumpRewardDistributorTest is Test {
         );
     }
 
-    /// A recipient allocated 100 who has claimed 40 is raised to a lifetime total of 150: the
-    /// remaining claimable is the new total minus what they already took, not the raw input.
-    function test_ReductionAboveLifetimeClaimedSetsRemainder() public {
-        _one(address(hydx), alice, 40e18);
-        vm.prank(alice);
-        distributor.claim(address(hydx));
-        _one(address(hydx), alice, 60e18); // allocated 100 in total, 40 of it already claimed
+    /// The same shortfall by the other route: raising an allocation moves no tokens in, so a raise the
+    /// contract cannot cover is refused.
+    function test_ARaiseBeyondWhatIsHeldReverts() public {
+        _one(address(hydx), alice, 100e18);
 
-        uint256 owedBefore = distributor.totalOwed(address(hydx));
+        address[] memory recipients = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        (recipients[0], amounts[0]) = (alice, 150e18);
+
+        vm.prank(owner);
+        vm.expectRevert(HydropumpRewardDistributor.AllocationExceedsBalance.selector);
+        distributor.setAllocation(address(hydx), recipients, amounts);
+
+        assertEq(distributor.claimable(alice, address(hydx)), 100e18, "the failed call changed nothing");
+    }
+
+    /// A raise is fine once the tokens are there, however they arrived.
+    function test_ARaiseCoveredByTheBalanceIsAllowed() public {
+        _one(address(hydx), alice, 100e18);
+        hydx.mint(address(distributor), 50e18); // sent in directly, outside allocate
 
         address[] memory recipients = new address[](1);
         uint256[] memory amounts = new uint256[](1);
@@ -262,8 +271,10 @@ contract HydropumpRewardDistributorTest is Test {
         vm.prank(owner);
         distributor.setAllocation(address(hydx), recipients, amounts);
 
-        assertEq(distributor.claimable(alice, address(hydx)), 110e18, "150 lifetime minus the 40 already claimed");
-        assertEq(distributor.totalOwed(address(hydx)), owedBefore + 50e18, "totalOwed rises by the claimable delta");
+        assertEq(distributor.claimable(alice, address(hydx)), 150e18);
+        assertEq(distributor.totalOwed(address(hydx)), 150e18);
+        vm.prank(alice);
+        assertEq(distributor.claim(address(hydx)), 150e18, "and it pays in full");
     }
 
     /// A cancelled allocation cannot be claimed, and what it freed is withdrawable.
