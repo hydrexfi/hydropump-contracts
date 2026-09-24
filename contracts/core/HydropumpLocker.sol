@@ -15,6 +15,7 @@ import {IFeeUse} from "../interfaces/IFeeUse.sol";
 import {INonfungiblePositionManager} from "../interfaces/INonfungiblePositionManager.sol";
 import {ISwapRouter} from "../interfaces/ISwapRouter.sol";
 import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
+import {SwapPriceLimit} from "../libraries/SwapPriceLimit.sol";
 
 /// @title HydropumpLocker
 /// @notice Holds every launch's positions permanently and splits the fees they earn.
@@ -373,9 +374,8 @@ contract HydropumpLocker is
     }
 
     /// @notice Collect, then turn the protocol's share into the pair asset and send it to the buyback.
-    /// @dev Permissionless; the recipient is fixed. Reverts if the pool cannot fill the sell, because a
-    ///      caller asking for exactly this should hear about it — `handleAllRewards` is where it is
-    ///      best-effort instead.
+    /// @dev Permissionless; the recipient is fixed. Sells only within `SwapPriceLimit`, leaving the rest in
+    ///      `protocolOwed`; still reverts if the pool itself fails the sell (`handleAllRewards` does not).
     function handleProtocolRewards(address token) external nonReentrant returns (uint256 delivered) {
         _splitRewards(token, fullMask(token));
         return _deliverProtocolShare(token);
@@ -417,13 +417,8 @@ contract HydropumpLocker is
 
     /// @notice Sell the protocol's launch-token share into the launch's own pool, so only the quote token
     ///         ever reaches the buyback. Permissionless; every destination is fixed.
-    /// @dev No price bound. Whoever calls this does not choose the price and takes none of the output —
-    ///      it is credited to the protocol either way — so the worst a sandwich achieves is giving the
-    ///      protocol less quote than it might have got. That is a cost worth paying to keep the call
-    ///      simple and always executable; a bound that can fail is a call that can be stuck.
-    ///
-    ///      Isolated from `splitRewards` on purpose: this is the part that can fail, and nothing else
-    ///      should fail with it.
+    /// @dev Fills only within `SwapPriceLimit`; the rest stays in `protocolOwed` for a later block.
+    ///      Kept apart from `splitRewards` so a pool that cannot fill never blocks a split.
     function convertProtocolShare(address token) external nonReentrant returns (uint256 quoteOut) {
         Launch storage launch = _launches[token];
         if (launch.pool == address(0)) revert UnknownLaunch();
@@ -435,8 +430,11 @@ contract HydropumpLocker is
         if (amount == 0) return 0;
 
         protocolOwed[token] = 0;
-        quoteOut = _convert(token, quoteToken, amount);
+        uint256 sold;
+        (sold, quoteOut) = _convert(token, quoteToken, amount);
 
+        protocolOwed[token] = amount - sold;
+        if (quoteOut == 0) return 0;
         protocolOwed[quoteToken] += quoteOut;
         emit ProtocolAccrued(quoteToken, quoteOut);
     }
@@ -517,9 +515,15 @@ contract HydropumpLocker is
         return token < quoteToken ? (total0, total1) : (total1, total0);
     }
 
-    /// @dev Sells into the launch's own pool with no minimum out. See `convertProtocolShare` for why the
-    ///      absence of a bound is a deliberate trade rather than an oversight.
-    function _convert(address token, address quoteToken, uint256 amountIn) internal returns (uint256 quoteOut) {
+    /// @return sold What filled; the router pulls only that much.
+    function _convert(address token, address quoteToken, uint256 amountIn)
+        internal
+        returns (uint256 sold, uint256 quoteOut)
+    {
+        (uint160 limitSqrtPrice, bool room) = SwapPriceLimit.get(_launches[token].pool, token < quoteToken);
+        if (!room) return (0, 0);
+
+        uint256 held = IERC20(token).balanceOf(address(this));
         IERC20(token).forceApprove(address(swapRouter), amountIn);
         quoteOut = swapRouter.exactInputSingle(
             ISwapRouter.ExactInputSingleParams({
@@ -530,12 +534,13 @@ contract HydropumpLocker is
                 deadline: block.timestamp,
                 amountIn: amountIn,
                 amountOutMinimum: 0,
-                limitSqrtPrice: 0
+                limitSqrtPrice: limitSqrtPrice
             })
         );
         IERC20(token).forceApprove(address(swapRouter), 0);
+        sold = held - IERC20(token).balanceOf(address(this));
 
-        emit ProtocolShareConverted(token, amountIn, quoteOut);
+        emit ProtocolShareConverted(token, sold, quoteOut);
     }
 
     function _setFeeSplit(uint64 _creatorFee, uint64 _protocolFee) internal {

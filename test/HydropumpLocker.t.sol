@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {HydropumpLocker} from "../contracts/core/HydropumpLocker.sol";
 import {HydropumpFixture} from "./helpers/HydropumpFixture.sol";
+import {MockAlgebraPool} from "./mocks/MockAlgebra.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 /// @notice The locker's one job: sweep the bands and send each share where it belongs.
@@ -205,6 +206,61 @@ contract HydropumpLockerTest is HydropumpFixture {
         assertGt(quoteOut, 0);
         assertEq(locker.protocolOwed(token), 0, "no launch token is kept");
         assertEq(locker.protocolOwed(_quote()), 2_000 + quoteOut);
+    }
+
+    /// Pushed past the buffer earlier in the block, nothing sells and the share stays booked.
+    function test_ConvertingSellsNothingOnceTheBlockMovedPastTheBuffer() public {
+        (address token, address pool) = _launchHere();
+        _accrueFees(token, 40_000e18, 8_000);
+        _seedPoolQuote(token, 1e18);
+        locker.splitRewards(token);
+
+        int24 pushed = _currentTick(pool) + _launchPriceOffset(token, -600);
+        _moveSpotThisBlock(pool, pushed);
+
+        vm.prank(stranger);
+        assertEq(locker.convertProtocolShare(token), 0, "nothing sold into the push");
+        assertEq(locker.protocolOwed(token), 10_000e18, "the share stays booked");
+        assertEq(_currentTick(pool), pushed, "and the pool was not touched");
+    }
+
+    /// Pushed part of the way, the sale stops at the buffer and the rest waits for a later block.
+    function test_ConvertingStopsFivePercentBelowTheBlockOpen() public {
+        (address token, address pool) = _launchHere();
+        _accrueFees(token, 40_000e18, 8_000);
+        _seedPoolQuote(token, 1e18);
+        locker.splitRewards(token);
+
+        int24 open = _currentTick(pool);
+        _moveSpotThisBlock(pool, open + _launchPriceOffset(token, -300));
+
+        uint256 quoteOut = locker.convertProtocolShare(token);
+
+        uint256 left = locker.protocolOwed(token);
+        assertGt(quoteOut, 0, "the room left under the buffer was used");
+        assertGt(left, 0, "the rest stays booked");
+        assertLt(left, 10_000e18);
+        assertEq(_currentTick(pool), open + _launchPriceOffset(token, -513), "stopped at the buffer");
+
+        vm.warp(block.timestamp + 2);
+        locker.convertProtocolShare(token);
+        assertLt(locker.protocolOwed(token), left);
+    }
+
+    /// Without a usable block-open price the sale is skipped, never reverted.
+    function test_ConvertingSkipsWithoutAUsableOracle() public {
+        (address token, address pool) = _launchHere();
+        _accrueFees(token, 40_000e18, 8_000);
+        _seedPoolQuote(token, 1e18);
+        locker.splitRewards(token);
+
+        address[3] memory plugins = [address(0), _quote(), pool];
+        uint16[3] memory configs = [uint16(1), 1, 0];
+        for (uint256 i = 0; i < 3; i++) {
+            MockAlgebraPool(pool).setPlugin(plugins[i], configs[i]);
+            assertEq(locker.convertProtocolShare(token), 0);
+            assertEq(locker.protocolOwed(token), 10_000e18, "the share stays booked");
+        }
     }
 
     function test_ConvertingNothingIsANoop() public {
