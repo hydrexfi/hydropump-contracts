@@ -110,6 +110,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
     error InvalidFeeSplit();
     error RegistryUnset();
     error UnknownFeeUse();
+    error InvalidCreatorRecipient();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -192,6 +193,7 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         if (msg.sender != launcher) revert NotLauncher();
         if (_launches[token].pool != address(0)) revert AlreadyRegistered();
         if (_creatorRecipient == address(0)) revert ZeroAddress();
+        _requirePayableRecipient(_creatorRecipient);
         if (positionIds.length == 0 || positionIds.length > MAX_POSITIONS) revert InvalidPositionCount();
 
         Launch storage launch = _launches[token];
@@ -425,9 +427,15 @@ contract HydropumpLocker is Initializable, Ownable2StepUpgradeable, UUPSUpgradea
         Launch storage launch = _launches[token];
         if (msg.sender != launch.creatorRecipient) revert NotCreatorRecipient();
         if (newRecipient == address(0)) revert ZeroAddress();
+        _requirePayableRecipient(newRecipient);
 
         emit CreatorRecipientUpdated(token, launch.creatorRecipient, newRecipient);
         launch.creatorRecipient = newRecipient;
+    }
+
+    /// @dev Either would book the creator's share straight back here, with no recipient left to fix it.
+    function _requirePayableRecipient(address recipient) internal view {
+        if (recipient == address(this) || recipient == feeUseRegistry) revert InvalidCreatorRecipient();
     }
 
     function onERC721Received(address, address, uint256, bytes calldata) external view override returns (bytes4) {

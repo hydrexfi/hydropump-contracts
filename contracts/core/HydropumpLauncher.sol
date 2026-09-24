@@ -76,6 +76,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     error QuoteConsumed();
     error BandOutOfRange();
     error DirectoryUnset();
+    error FeeUseRegistryMismatch();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -171,6 +172,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
 
         address directory = pairDirectory;
         if (directory == address(0)) revert DirectoryUnset();
+        if (feeUseRegistry != IHydropumpLocker(locker).feeUseRegistry()) revert FeeUseRegistryMismatch();
 
         token = address(new HydropumpToken(params.name, params.symbol, SUPPLY));
 
