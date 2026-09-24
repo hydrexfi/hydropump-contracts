@@ -16,3 +16,4 @@
 14:39  NOTE  COST wall clock 0 h 41 min, $0.00 model spend
 14:40  DONE  branch pushed — origin/fix/distributor-allocation-total
 14:40  DONE  PR opened — https://github.com/hydrexfi/hydropump-contracts/pull/11, linked with Closes #9
+14:44  DONE  CI green on latest commit (run 36000582226): unit tests, build/sizes/format, storage-layout-snapshots all pass
