@@ -8,6 +8,7 @@ import {AutoLpFeeUse} from "../contracts/feeuses/AutoLpFeeUse.sol";
 import {BuybackBurnFeeUse} from "../contracts/feeuses/BuybackBurnFeeUse.sol";
 import {FeeUses} from "../contracts/libraries/FeeUses.sol";
 import {FeeUseRegistry} from "../contracts/helpers/FeeUseRegistry.sol";
+import {HydropumpToken} from "../contracts/core/HydropumpToken.sol";
 import {HydropumpLocker} from "../contracts/core/HydropumpLocker.sol";
 import {HydropumpFixture} from "./helpers/HydropumpFixture.sol";
 import {MockAlgebraPool} from "./mocks/MockAlgebra.sol";
@@ -220,6 +221,8 @@ contract FeeUsesTest is HydropumpFixture {
     /// The quote side buys the launch token in its own pool and the lot is destroyed. Supply only falls.
     function test_BuybackBurnBuysWithTheQuoteAndBurnsEverything() public {
         (address token,) = _launchWithFees(FeeUses.BUYBACK_BURN, 40_000e18, 1e18);
+        // Past the launch window, where the fee use's burn is the only thing that moves supply.
+        vm.roll(vm.getBlockNumber() + HydropumpToken(token).TAX_WINDOW());
 
         uint256 supplyBefore = IERC20(token).totalSupply();
 
@@ -255,6 +258,20 @@ contract FeeUsesTest is HydropumpFixture {
         locker.spendCreatorShare(token);
         assertGt(buybackBurn.lifetimeBurned(token), 0);
         assertLt(IERC20(token).totalSupply(), supplyBefore);
+    }
+
+    /// In the launch window the buy arrives taxed, so the burn must be what arrived, not the router's figure.
+    function test_ABuybackInTheLaunchWindowBurnsWhatArrived() public {
+        (address token,) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
+        assertGt(HydropumpToken(token).currentTaxBps(), 0, "still in the window");
+
+        uint256 supplyBefore = IERC20(token).totalSupply();
+        locker.spendCreatorShare(token);
+
+        uint256 burned = buybackBurn.lifetimeBurned(token);
+        assertGt(burned, 0);
+        assertGt(supplyBefore - IERC20(token).totalSupply(), burned, "the tax is burnt on top");
+        _assertNothingHeld(address(buybackBurn), token);
     }
 
     /// Pushed past the buffer earlier in the block, nothing is bought and the quote is rebooked.

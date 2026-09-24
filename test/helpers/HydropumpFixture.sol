@@ -175,10 +175,7 @@ abstract contract HydropumpFixture is Test {
         address pool = locker.poolOf(token);
         uint256[] memory positionIds = locker.getPositions(token);
 
-        if (launchAmount > 0) {
-            vm.prank(pool);
-            IERC20(token).transfer(NPM, launchAmount);
-        }
+        if (launchAmount > 0) _moveOutOfPool(token, pool, launchAmount);
         if (quoteAmount > 0) MockERC20(quoteToken).mint(NPM, quoteAmount);
 
         bool isToken0 = token < quoteToken;
@@ -189,15 +186,19 @@ abstract contract HydropumpFixture is Test {
         npm.setOwed(positionIds[0], owed0, owed1);
     }
 
+    /// @dev Moves launch-token fees to the mock NPM, which pays collects from its own balance. A transfer
+    ///      would pay the launch tax; real fees go from the pool to the locker, which is exempt.
+    function _moveOutOfPool(address token, address pool, uint256 amount) internal {
+        deal(token, pool, IERC20(token).balanceOf(pool) - amount);
+        deal(token, NPM, IERC20(token).balanceOf(NPM) + amount);
+    }
+
     /// @dev `_accrueFees`, but onto a band the caller names.
     function _accrueFeesOn(address token, uint256 index, uint256 launchAmount, uint256 quoteAmount) internal {
         address quoteToken = locker.quoteTokenOf(token);
         address pool = locker.poolOf(token);
 
-        if (launchAmount > 0) {
-            vm.prank(pool);
-            IERC20(token).transfer(NPM, launchAmount);
-        }
+        if (launchAmount > 0) _moveOutOfPool(token, pool, launchAmount);
         if (quoteAmount > 0) MockERC20(quoteToken).mint(NPM, quoteAmount);
 
         bool isToken0 = token < quoteToken;

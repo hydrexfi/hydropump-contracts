@@ -67,8 +67,9 @@ contract BuybackBurnFeeUse is IFeeUse {
         (uint160 limitSqrtPrice, bool room) = SwapPriceLimit.get(locker.poolOf(token), quoteToken < token);
         if (room) {
             uint256 held = IERC20(quoteToken).balanceOf(address(this));
+            uint256 heldToken = IERC20(token).balanceOf(address(this));
             IERC20(quoteToken).forceApprove(address(swapRouter), quoteAmount);
-            bought = swapRouter.exactInputSingle(
+            swapRouter.exactInputSingle(
                 ISwapRouter.ExactInputSingleParams({
                     tokenIn: quoteToken,
                     tokenOut: token,
@@ -83,6 +84,8 @@ contract BuybackBurnFeeUse is IFeeUse {
             IERC20(quoteToken).forceApprove(address(swapRouter), 0);
             // A delta, so quote donated here is never rebooked to the creator.
             quoteSpent = held - IERC20(quoteToken).balanceOf(address(this));
+            // What arrived, not the router's figure: in the launch window the token taxes the buy.
+            bought = IERC20(token).balanceOf(address(this)) - heldToken;
         }
 
         uint256 unspent = quoteAmount - quoteSpent;

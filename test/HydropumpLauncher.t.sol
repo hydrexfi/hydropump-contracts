@@ -7,10 +7,13 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 
 import {HydropumpLauncher} from "../contracts/core/HydropumpLauncher.sol";
 import {HydropumpLocker} from "../contracts/core/HydropumpLocker.sol";
+import {HydropumpToken} from "../contracts/core/HydropumpToken.sol";
 import {PairDirectory} from "../contracts/helpers/PairDirectory.sol";
 import {FeeUseRegistry} from "../contracts/helpers/FeeUseRegistry.sol";
 import {FeeUses} from "../contracts/libraries/FeeUses.sol";
+import {ISwapRouter} from "../contracts/interfaces/ISwapRouter.sol";
 import {HydropumpFixture} from "./helpers/HydropumpFixture.sol";
+import {MockERC20} from "./mocks/MockERC20.sol";
 
 /// @notice The launcher after the registry moved out: what it still owns, and what it now asks for.
 contract HydropumpLauncherTest is HydropumpFixture {
@@ -246,6 +249,35 @@ contract HydropumpLauncherTest is HydropumpFixture {
         assertTrue(first != second);
         assertEq(IERC20(first).totalSupply(), launcher.SUPPLY());
         assertEq(IERC20(second).totalSupply(), launcher.SUPPLY());
+    }
+
+    /// The launcher points the token at its pool only after the creator's buy, so that buy is the one
+    /// that escapes the launch tax, and it exempts the locker so fee collection is never taxed.
+    function test_OnlyTheCreatorsBuyEscapesTheLaunchTax() public {
+        (address token, address pool,) = _launch(HIGH_QUOTE, bytes32(0), 1e18);
+        assertEq(HydropumpToken(token).pool(), pool);
+        assertEq(HydropumpToken(token).taxExempt(), address(locker));
+        uint256 creatorFill = IERC20(token).balanceOf(creator);
+        assertGt(creatorFill, 0);
+
+        MockERC20(HIGH_QUOTE).mint(stranger, 1e9);
+        vm.startPrank(stranger);
+        IERC20(HIGH_QUOTE).approve(ROUTER, 1e9);
+        uint256 poolOut = router.exactInputSingle(
+            ISwapRouter.ExactInputSingleParams({
+                tokenIn: HIGH_QUOTE,
+                tokenOut: token,
+                deployer: address(0),
+                recipient: stranger,
+                deadline: block.timestamp,
+                amountIn: 1e9,
+                amountOutMinimum: 0,
+                limitSqrtPrice: 0
+            })
+        );
+        vm.stopPrank();
+
+        assertEq(IERC20(token).balanceOf(stranger), poolOut - poolOut * 9_900 / 10_000, "a later buy keeps 1%");
     }
 
     // =============================

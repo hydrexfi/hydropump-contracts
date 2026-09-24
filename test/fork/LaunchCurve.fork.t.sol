@@ -203,6 +203,7 @@ contract LaunchCurveForkTest is ForkFixture {
     function test_RoundTripSellReturnsQuote() public onlyForked {
         Quote memory q = _quote("WETH");
         (address token,,,) = _launchOnSide(q.token, true, bytes32(0));
+        _passLaunchWindow();
 
         uint256 bought = _swapIn(alice, q.token, token, 1 ether);
         uint256 quoteBefore = IERC20(q.token).balanceOf(alice);

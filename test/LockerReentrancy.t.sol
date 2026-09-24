@@ -86,8 +86,7 @@ contract LockerReentrancyTest is HydropumpFixture {
     }
 
     function _accrue(address t, uint256 launchAmt, uint256 quoteAmt) internal {
-        vm.prank(locker.poolOf(t));
-        IERC20(t).transfer(NPM, launchAmt);
+        _moveOutOfPool(t, locker.poolOf(t), launchAmt);
         hq.mint(NPM, quoteAmt);
         npm.setOwed(locker.getPositions(t)[0], uint128(launchAmt), uint128(quoteAmt));
     }

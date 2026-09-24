@@ -191,6 +191,8 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         positionIds = _mintBands(token, params.quoteToken, pool, startTick, isToken0);
 
         if (params.buyAmount > 0) _buy(token, params.quoteToken, params.buyAmount);
+        // After the creator's buy, so only that buy escapes the launch tax.
+        HydropumpToken(token).setPool(pool, locker);
 
         address creatorRecipient = params.creatorRecipient == address(0) ? msg.sender : params.creatorRecipient;
         IHydropumpLocker(locker)

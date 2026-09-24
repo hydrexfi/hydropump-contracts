@@ -23,6 +23,7 @@ contract SwapPriceLimitForkTest is ForkFixture {
     /// @dev Real fees split, `bob` holding launch tokens to push with, and a fresh block.
     function _tradedLaunch(bytes32 feeUse) internal returns (address token, address pool) {
         (token, pool,,) = _launchOnSide(WETH, _wantToken0(), feeUse);
+        _passLaunchWindow();
         _tradeBothWaysAndAge(token, WETH, 2 ether);
         _swapIn(bob, WETH, token, 1 ether);
         locker.splitRewards(token);
