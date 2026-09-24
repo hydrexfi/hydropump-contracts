@@ -32,6 +32,7 @@ contract HydropumpRewardDistributor is Ownable2Step {
     error ZeroAddress();
     error LengthMismatch();
     error NothingAllocated();
+    error AllocationBelowLifetimeClaimed();
 
     modifier onlyOperator() {
         if (msg.sender != operator && msg.sender != owner()) revert NotOperator();
@@ -108,7 +109,11 @@ contract HydropumpRewardDistributor is Ownable2Step {
         operator = newOperator;
     }
 
-    /// @notice Overwrite what recipients are owed, to whatever the owner says — including nothing.
+    /// @notice Set a recipient's lifetime allocation, including nothing.
+    /// @dev `amounts[i]` is the recipient's total allocation for the token, not just what remains.
+    ///      Precondition: `amounts[i] >= lifetimeClaimed[recipients[i]][token]` — a correction can never
+    ///      claw back what was already paid, only cancel what has not been. Postcondition:
+    ///      `claimable[recipients[i]][token] + lifetimeClaimed[recipients[i]][token] == amounts[i]`.
     function setAllocation(address token, address[] calldata recipients, uint256[] calldata amounts)
         external
         onlyOwner
@@ -119,11 +124,15 @@ contract HydropumpRewardDistributor is Ownable2Step {
         for (uint256 i = 0; i < recipients.length; i++) {
             if (recipients[i] == address(0)) revert ZeroAddress();
 
-            uint256 previous = claimable[recipients[i]][token];
-            claimable[recipients[i]][token] = amounts[i];
-            totalOwed[token] = totalOwed[token] - previous + amounts[i];
+            uint256 claimed = lifetimeClaimed[recipients[i]][token];
+            if (amounts[i] < claimed) revert AllocationBelowLifetimeClaimed();
 
-            emit AllocationSet(token, recipients[i], previous, amounts[i]);
+            uint256 previous = claimable[recipients[i]][token];
+            uint256 updated = amounts[i] - claimed;
+            claimable[recipients[i]][token] = updated;
+            totalOwed[token] = totalOwed[token] - previous + updated;
+
+            emit AllocationSet(token, recipients[i], previous, updated);
         }
     }
 

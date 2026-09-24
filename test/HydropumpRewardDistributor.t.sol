@@ -220,6 +220,52 @@ contract HydropumpRewardDistributorTest is Test {
         assertEq(hydx.balanceOf(address(distributor)), 100e18, "and no tokens moved");
     }
 
+    /// HP-07: a reduction below what the recipient already claimed must not re-open a payout.
+    /// Adapted from the security review's test_T4H1_7_claimBeforeAReductionKeepsTheOldAmount.
+    function test_ReductionBelowLifetimeClaimedReverts() public {
+        _one(address(hydx), alice, 100e18);
+        vm.prank(alice);
+        distributor.claim(address(hydx));
+
+        address[] memory recipients = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        (recipients[0], amounts[0]) = (alice, 10e18); // "reduce" to 10, below the 100 already claimed
+
+        vm.prank(owner);
+        vm.expectRevert(HydropumpRewardDistributor.AllocationBelowLifetimeClaimed.selector);
+        distributor.setAllocation(address(hydx), recipients, amounts);
+
+        assertEq(distributor.claimable(alice, address(hydx)), 0, "the failed call changed nothing");
+        vm.prank(alice);
+        assertEq(distributor.claim(address(hydx)), 0, "nothing left for alice to claim");
+        assertLe(
+            distributor.totalOwed(address(hydx)),
+            hydx.balanceOf(address(distributor)),
+            "the ledger never promises more than the contract holds"
+        );
+    }
+
+    /// A recipient allocated 100 who has claimed 40 is raised to a lifetime total of 150: the
+    /// remaining claimable is the new total minus what they already took, not the raw input.
+    function test_ReductionAboveLifetimeClaimedSetsRemainder() public {
+        _one(address(hydx), alice, 40e18);
+        vm.prank(alice);
+        distributor.claim(address(hydx));
+        _one(address(hydx), alice, 60e18); // allocated 100 in total, 40 of it already claimed
+
+        uint256 owedBefore = distributor.totalOwed(address(hydx));
+
+        address[] memory recipients = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        (recipients[0], amounts[0]) = (alice, 150e18);
+
+        vm.prank(owner);
+        distributor.setAllocation(address(hydx), recipients, amounts);
+
+        assertEq(distributor.claimable(alice, address(hydx)), 110e18, "150 lifetime minus the 40 already claimed");
+        assertEq(distributor.totalOwed(address(hydx)), owedBefore + 50e18, "totalOwed rises by the claimable delta");
+    }
+
     /// A cancelled allocation cannot be claimed, and what it freed is withdrawable.
     function test_ClawbackThenWithdraw() public {
         _allocate(address(hydx), alice, 30e18, bob, 70e18);
