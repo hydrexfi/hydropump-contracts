@@ -48,8 +48,9 @@ contract BuybackBurnFeeUse is IFeeUse {
 
         uint256 bought;
         if (quoteAmount > 0) {
+            uint256 heldBefore = IERC20(token).balanceOf(address(this));
             IERC20(quoteToken).forceApprove(address(swapRouter), quoteAmount);
-            bought = swapRouter.exactInputSingle(
+            swapRouter.exactInputSingle(
                 ISwapRouter.ExactInputSingleParams({
                     tokenIn: quoteToken,
                     tokenOut: token,
@@ -62,6 +63,8 @@ contract BuybackBurnFeeUse is IFeeUse {
                 })
             );
             IERC20(quoteToken).forceApprove(address(swapRouter), 0);
+            // What arrived, not the router's figure: in the launch window the token taxes the buy.
+            bought = IERC20(token).balanceOf(address(this)) - heldBefore;
         }
 
         burned += bought;

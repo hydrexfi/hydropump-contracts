@@ -24,6 +24,7 @@ contract AutoLpRemaindersForkTest is ForkFixture {
 
     function test_QuoteFeesWaitThenCompoundWithLaterSellFees() public onlyForked {
         (address token, address pool, uint256[] memory ids,) = _launchOnSide(WETH, _wantToken0(), FeeUses.AUTO_LP);
+        _passLaunchWindow();
         uint256 acquired = _swapIn(alice, WETH, token, 1 ether);
         locker.splitRewards(token);
         uint256 retained = locker.creatorOwed(token, WETH);
@@ -85,6 +86,7 @@ contract AutoLpRemaindersForkTest is ForkFixture {
     /// @dev A characterization test, not an MEV-protection assertion: spot execution remains permissionless.
     function test_PermissionlessSpotExecutionStillHasSandwichRisk() public onlyForked {
         (address token,,,) = _launchOnSide(WETH, _wantToken0(), FeeUses.AUTO_LP);
+        _passLaunchWindow();
         for (uint256 i; i < 30; i++) {
             uint256 volumeBought = _swapIn(alice, WETH, token, 5 ether);
             _sell(alice, token, WETH, volumeBought);

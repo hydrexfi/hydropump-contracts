@@ -24,6 +24,7 @@ contract FeeFlowForkTest is ForkFixture {
     function _tradedLaunch(bytes32 feeUse) internal returns (address token, address pool, address account) {
         uint256[] memory ids;
         (token, pool, ids, account) = _launchOnSide(WETH, _wantToken0(), feeUse);
+        _passLaunchWindow();
         _tradeBothWaysAndAge(token, WETH, 2 ether);
     }
 
@@ -92,6 +93,7 @@ contract FeeFlowForkTest is ForkFixture {
     /// A pool minutes old converts perfectly well now that nothing asks it for a price history.
     function test_AYoungPoolConvertsFine() public onlyForked {
         (address token,,,) = _launchOnSide(WETH, _wantToken0(), FeeUses.CREATOR_BALANCE);
+        _passLaunchWindow();
         uint256 bought = _swapIn(alice, WETH, token, 1 ether);
         _sell(alice, token, WETH, bought / 2); // a sell, so there is a launch-token share to convert
 

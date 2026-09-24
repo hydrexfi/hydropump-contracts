@@ -23,6 +23,10 @@ contract TokenDeployer {
         if (to != address(this)) token.transfer(to, supply);
     }
 
+    function setPool(HydropumpToken token, address pool, address taxExempt) external {
+        token.setPool(pool, taxExempt);
+    }
+
     function initCodeHash(string memory name_, string memory symbol_, uint256 supply) external pure returns (bytes32) {
         return keccak256(abi.encodePacked(type(HydropumpToken).creationCode, abi.encode(name_, symbol_, supply)));
     }
@@ -140,5 +144,90 @@ contract HydropumpTokenTest is Test {
         HydropumpToken token = deployer.deploy("Alpha", "ALPHA", 1e18, alice);
         (, string memory name,,,,,) = token.eip712Domain();
         assertEq(name, "Alpha", "domain separator must be built from the actual name");
+    }
+
+    // =============================
+    //  LAUNCH TAX
+    // =============================
+
+    address internal pool = makeAddr("pool");
+    address internal locker = makeAddr("locker");
+
+    function _pooled() internal returns (HydropumpToken token) {
+        token = deployer.deploy("Alpha", "ALPHA", 1_000e18, pool);
+        deployer.setPool(token, pool, locker);
+    }
+
+    function test_ABuyInTheLaunchBlockKeepsOnePercent() public {
+        HydropumpToken token = _pooled();
+
+        vm.prank(pool);
+        token.transfer(alice, 100e18);
+
+        assertEq(token.balanceOf(alice), 1e18, "99% taxed");
+        assertEq(token.totalSupply(), 1_000e18 - 99e18, "and the tax is burnt");
+    }
+
+    function test_TheTaxFallsLinearlyAndEndsWithTheWindow() public {
+        HydropumpToken token = _pooled();
+        uint256 start = vm.getBlockNumber();
+
+        for (uint256 k = 0; k <= 11; k++) {
+            vm.roll(start + k);
+            uint256 expectedBps = k < 10 ? 9_900 * (10 - k) / 10 : 0;
+            assertEq(token.currentTaxBps(), expectedBps);
+
+            uint256 before = token.balanceOf(alice);
+            vm.prank(pool);
+            token.transfer(alice, 10e18);
+            assertEq(token.balanceOf(alice) - before, 10e18 - 10e18 * expectedBps / 10_000);
+        }
+    }
+
+    /// Algebra reverts a swap whose input arrives short, so a sell must reach the pool whole.
+    function test_TransfersIntoThePoolAndBetweenHoldersAreNotTaxed() public {
+        HydropumpToken token = deployer.deploy("Alpha", "ALPHA", 1_000e18, alice);
+        deployer.setPool(token, pool, locker);
+
+        vm.startPrank(alice);
+        token.transfer(pool, 100e18);
+        token.transfer(bob, 100e18);
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(pool), 100e18);
+        assertEq(token.balanceOf(bob), 100e18);
+        assertEq(token.totalSupply(), 1_000e18);
+    }
+
+    /// Anyone can make the locker collect, so without this LP fees collected in the window would be burnt.
+    function test_TheExemptAddressCollectsFromThePoolUntaxed() public {
+        HydropumpToken token = _pooled();
+
+        vm.prank(pool);
+        token.transfer(locker, 100e18);
+
+        assertEq(token.balanceOf(locker), 100e18);
+    }
+
+    /// The launcher's own transfers into the pool, and the creator's buy, happen before the pool is set.
+    function test_NothingIsTaxedBeforeThePoolIsSet() public {
+        HydropumpToken token = deployer.deploy("Alpha", "ALPHA", 1_000e18, pool);
+
+        vm.prank(pool);
+        token.transfer(alice, 100e18);
+
+        assertEq(token.balanceOf(alice), 100e18);
+    }
+
+    function test_OnlyTheLauncherSetsThePoolAndOnlyOnce() public {
+        HydropumpToken token = deployer.deploy("Alpha", "ALPHA", 1e18, alice);
+        assertEq(token.launcher(), address(deployer));
+
+        vm.expectRevert(HydropumpToken.NotLauncher.selector);
+        token.setPool(pool, locker);
+
+        deployer.setPool(token, pool, locker);
+        vm.expectRevert(HydropumpToken.PoolAlreadySet.selector);
+        deployer.setPool(token, bob, locker);
     }
 }
