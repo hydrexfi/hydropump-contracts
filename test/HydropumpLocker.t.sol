@@ -335,6 +335,18 @@ contract HydropumpLockerTest is HydropumpFixture {
         assertEq(locker.creatorRecipient(token), stranger);
     }
 
+    /// The locker or registry as recipient would trap the creator's share for good.
+    function test_RecipientCannotBeRedirectedToTheLockerOrRegistry() public {
+        (address token,) = _launchHere();
+
+        vm.startPrank(creator);
+        vm.expectRevert(HydropumpLocker.InvalidCreatorRecipient.selector);
+        locker.setCreatorRecipient(token, address(locker));
+        vm.expectRevert(HydropumpLocker.InvalidCreatorRecipient.selector);
+        locker.setCreatorRecipient(token, address(registry));
+        vm.stopPrank();
+    }
+
     function test_ExposesNoWayToMoveAPosition() public view {
         // The lock is structural: no transfer, withdraw, burn or decreaseLiquidity entry point exists.
         string[4] memory forbidden = [

@@ -162,10 +162,6 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
                               USER WRITE
     //////////////////////////////////////////////////////////////*/
 
-    /// @dev Precondition: `feeUseRegistry` equals the locker's own `feeUseRegistry`. The launcher records a
-    ///      creator's fee-use choice in its copy; the locker spends the creator's share through its own. If
-    ///      the two ever diverged — a half-finished redeploy — a choice would be recorded somewhere the
-    ///      locker never reads, and the launch would silently ride the other registry's default instead.
     function launch(LaunchParams calldata params)
         external
         payable

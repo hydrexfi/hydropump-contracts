@@ -3,8 +3,10 @@ pragma solidity 0.8.26;
 
 import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {HydropumpLauncher} from "../contracts/core/HydropumpLauncher.sol";
+import {HydropumpLocker} from "../contracts/core/HydropumpLocker.sol";
 import {PairDirectory} from "../contracts/helpers/PairDirectory.sol";
 import {FeeUseRegistry} from "../contracts/helpers/FeeUseRegistry.sol";
 import {FeeUses} from "../contracts/libraries/FeeUses.sol";
@@ -131,27 +133,60 @@ contract HydropumpLauncherTest is HydropumpFixture {
         launcher.launch{value: LAUNCH_FEE}(params);
     }
 
-    /// HP-08: zeroing only the launcher's escrow does not silently fall back to the locker's default any
-    /// more — the locker's escrow was wired in `setUp` and can never be unset back to zero (`HydropumpLocker
-    /// .setFeeUseRegistry` rejects `address(0)`), so this now leaves the pair disagreeing, exactly the
-    /// divergence that used to let a creator's choice go unrecorded and get silently spent as whatever the
-    /// locker's own registry defaults to.
-    function test_ZeroingOnlyTheLaunchersEscrowNowRevertsAsADivergence() public {
+    /// A launcher and locker on different escrows would record a choice where it is never spent.
+    function test_LaunchRevertsWhenTheEscrowsDisagree() public {
         vm.prank(admin);
         launcher.setFeeUseRegistry(address(0));
 
         vm.prank(creator);
         vm.expectRevert(HydropumpLauncher.FeeUseRegistryMismatch.selector);
-        launcher.launch{value: LAUNCH_FEE}(
-            HydropumpLauncher.LaunchParams({
-                name: "Alpha",
-                symbol: "ALPHA",
-                quoteToken: HIGH_QUOTE,
-                creatorRecipient: creator,
-                buyAmount: 0,
-                feeUse: FeeUses.AUTO_LP
-            })
+        launcher.launch{value: LAUNCH_FEE}(_params(creator, FeeUses.AUTO_LP));
+
+        vm.prank(admin);
+        launcher.setFeeUseRegistry(stranger);
+
+        vm.prank(creator);
+        vm.expectRevert(HydropumpLauncher.FeeUseRegistryMismatch.selector);
+        launcher.launch{value: LAUNCH_FEE}(_params(creator, FeeUses.AUTO_LP));
+    }
+
+    /// A pair with no escrow wired on either side still launches.
+    function test_LaunchingStillWorksWithNoEscrowOnEitherSide() public {
+        HydropumpLocker freshLocker = HydropumpLocker(
+            address(
+                new ERC1967Proxy(
+                    address(new HydropumpLocker()),
+                    abi.encodeCall(HydropumpLocker.initialize, (owner, address(0), buyback, CREATOR_FEE, PROTOCOL_FEE))
+                )
+            )
         );
+        HydropumpLauncher freshLauncher = HydropumpLauncher(
+            address(
+                new ERC1967Proxy(
+                    address(new HydropumpLauncher()),
+                    abi.encodeCall(
+                        HydropumpLauncher.initialize,
+                        (owner, admin, address(freshLocker), address(directory), LAUNCH_FEE)
+                    )
+                )
+            )
+        );
+        vm.prank(owner);
+        freshLocker.setLauncher(address(freshLauncher));
+
+        vm.prank(creator);
+        (address token,,) = freshLauncher.launch{value: LAUNCH_FEE}(_params(creator, bytes32(0)));
+        assertTrue(token != address(0));
+    }
+
+    /// The locker or registry as recipient would trap the creator's share for good.
+    function test_LaunchRejectsTheLockerOrRegistryAsRecipient() public {
+        vm.startPrank(creator);
+        vm.expectRevert(HydropumpLocker.InvalidCreatorRecipient.selector);
+        launcher.launch{value: LAUNCH_FEE}(_params(address(locker), FeeUses.CREATOR_BALANCE));
+        vm.expectRevert(HydropumpLocker.InvalidCreatorRecipient.selector);
+        launcher.launch{value: LAUNCH_FEE}(_params(address(registry), FeeUses.CREATOR_BALANCE));
+        vm.stopPrank();
     }
 
     function test_OnlyAdminCanRepointTheEscrow() public {
@@ -288,5 +323,16 @@ contract HydropumpLauncherTest is HydropumpFixture {
         HydropumpLauncher impl = new HydropumpLauncher();
         vm.expectRevert();
         impl.initialize(owner, admin, address(locker), address(directory), LAUNCH_FEE);
+    }
+
+    function _params(address recipient, bytes32 feeUse) internal pure returns (HydropumpLauncher.LaunchParams memory) {
+        return HydropumpLauncher.LaunchParams({
+            name: "Alpha",
+            symbol: "ALPHA",
+            quoteToken: HIGH_QUOTE,
+            creatorRecipient: recipient,
+            buyAmount: 0,
+            feeUse: feeUse
+        });
     }
 }

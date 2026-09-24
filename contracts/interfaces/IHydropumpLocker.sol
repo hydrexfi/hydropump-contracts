@@ -15,8 +15,7 @@ interface IHydropumpLocker {
     ///         rather than keeping their own copy, so redirecting it moves every strategy at once.
     function creatorRecipient(address token) external view returns (address);
 
-    /// @notice The registry the locker spends a creator's share through. Read by the launcher at launch
-    ///         time to confirm its own `feeUseRegistry` records a creator's choice where it will be spent.
+    /// @notice The registry the locker spends a creator's share through.
     function feeUseRegistry() external view returns (address);
 
     function quoteTokenOf(address token) external view returns (address);
