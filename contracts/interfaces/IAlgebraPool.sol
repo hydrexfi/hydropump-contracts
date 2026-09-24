@@ -12,6 +12,8 @@ interface IAlgebraPool {
 
     function fee() external view returns (uint16);
 
+    function plugin() external view returns (address);
+
     function globalState()
         external
         view

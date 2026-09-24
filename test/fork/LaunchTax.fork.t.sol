@@ -109,7 +109,9 @@ contract LaunchTaxForkTest is ForkFixture {
         _arrangeSide(WETH, true);
         (address token,,) = _launchFrom(creator, WETH, FeeUses.BUYBACK_BURN, 0);
         _swapIn(alice, WETH, token, 1 ether); // pays its fee in WETH
+        // A new block opens at the pushed price, so the buyback's price limit leaves it room.
         vm.roll(vm.getBlockNumber() + 1);
+        vm.warp(vm.getBlockTimestamp() + 2);
 
         uint256 supplyBefore = IERC20(token).totalSupply();
         locker.handleAllRewards(token);

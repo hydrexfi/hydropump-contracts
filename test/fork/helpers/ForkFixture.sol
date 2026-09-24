@@ -190,6 +190,7 @@ abstract contract ForkFixture is Test {
     /// @dev Rolls past the launch tax, for tests about ordinary trading rather than the launch window.
     function _passLaunchWindow() internal {
         vm.roll(vm.getBlockNumber() + 10);
+        vm.warp(vm.getBlockTimestamp() + 20); // Base blocks are 2s apart
     }
 
     function _launchOnSide(address quoteToken, bool wantToken0, bytes32 feeUse)
