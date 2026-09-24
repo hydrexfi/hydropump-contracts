@@ -76,6 +76,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     error QuoteConsumed();
     error BandOutOfRange();
     error DirectoryUnset();
+    error FeeUseRegistryMismatch();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -161,6 +162,10 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
                               USER WRITE
     //////////////////////////////////////////////////////////////*/
 
+    /// @dev Precondition: `feeUseRegistry` equals the locker's own `feeUseRegistry`. The launcher records a
+    ///      creator's fee-use choice in its copy; the locker spends the creator's share through its own. If
+    ///      the two ever diverged — a half-finished redeploy — a choice would be recorded somewhere the
+    ///      locker never reads, and the launch would silently ride the other registry's default instead.
     function launch(LaunchParams calldata params)
         external
         payable
@@ -171,6 +176,7 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
 
         address directory = pairDirectory;
         if (directory == address(0)) revert DirectoryUnset();
+        if (feeUseRegistry != IHydropumpLocker(locker).feeUseRegistry()) revert FeeUseRegistryMismatch();
 
         token = address(new HydropumpToken(params.name, params.symbol, SUPPLY));
 

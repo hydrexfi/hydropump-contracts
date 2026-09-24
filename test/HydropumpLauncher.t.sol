@@ -131,14 +131,27 @@ contract HydropumpLauncherTest is HydropumpFixture {
         launcher.launch{value: LAUNCH_FEE}(params);
     }
 
-    /// A launcher with no escrow still launches. It just leaves every launch on whatever default the escrow
-    /// is later given, rather than refusing to open a pool over a fee routing detail.
-    function test_LaunchingStillWorksWithNoEscrowSet() public {
+    /// HP-08: zeroing only the launcher's escrow does not silently fall back to the locker's default any
+    /// more — the locker's escrow was wired in `setUp` and can never be unset back to zero (`HydropumpLocker
+    /// .setFeeUseRegistry` rejects `address(0)`), so this now leaves the pair disagreeing, exactly the
+    /// divergence that used to let a creator's choice go unrecorded and get silently spent as whatever the
+    /// locker's own registry defaults to.
+    function test_ZeroingOnlyTheLaunchersEscrowNowRevertsAsADivergence() public {
         vm.prank(admin);
         launcher.setFeeUseRegistry(address(0));
 
-        (address token,,) = _launch(HIGH_QUOTE, FeeUses.AUTO_LP, 0);
-        assertTrue(token != address(0));
+        vm.prank(creator);
+        vm.expectRevert(HydropumpLauncher.FeeUseRegistryMismatch.selector);
+        launcher.launch{value: LAUNCH_FEE}(
+            HydropumpLauncher.LaunchParams({
+                name: "Alpha",
+                symbol: "ALPHA",
+                quoteToken: HIGH_QUOTE,
+                creatorRecipient: creator,
+                buyAmount: 0,
+                feeUse: FeeUses.AUTO_LP
+            })
+        );
     }
 
     function test_OnlyAdminCanRepointTheEscrow() public {

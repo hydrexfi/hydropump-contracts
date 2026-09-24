@@ -88,4 +88,98 @@ contract RecipientAndRegistryChecksTest is HydropumpFixture {
         locker.setCreatorRecipient(token, creator);
         assertEq(locker.creatorRecipient(token), creator, "and can repoint to another ordinary recipient");
     }
+
+    // ==========================================================================================
+    //  Launcher and locker registries must agree (HP-08)
+    // ==========================================================================================
+
+    /// @dev The launcher records a creator's fee-use choice in its own `feeUseRegistry`; the locker spends
+    ///      through its own. If an admin repoints only one — a half-finished redeploy — a creator who chose
+    ///      AUTO_LP would be silently spent as the locker registry's default instead.
+    function test_HP08_divergentRegistriesRevertLaunch() public {
+        FeeUseRegistry other = FeeUseRegistry(
+            address(
+                new ERC1967Proxy(
+                    address(new FeeUseRegistry()), abi.encodeCall(FeeUseRegistry.initialize, (owner, address(launcher)))
+                )
+            )
+        );
+        vm.startPrank(owner);
+        other.registerFeeUse(FeeUses.CREATOR_BALANCE, address(creatorBalance));
+        other.registerFeeUse(FeeUses.AUTO_LP, address(autoLp));
+        other.setDefaultFeeUse(FeeUses.CREATOR_BALANCE);
+        vm.stopPrank();
+
+        // The launcher now records choices in `other`; the locker still spends through `registry`.
+        vm.prank(admin);
+        launcher.setFeeUseRegistry(address(other));
+
+        vm.prank(creator);
+        vm.expectRevert(HydropumpLauncher.FeeUseRegistryMismatch.selector);
+        launcher.launch{value: LAUNCH_FEE}(
+            HydropumpLauncher.LaunchParams({
+                name: "Alpha",
+                symbol: "ALPHA",
+                quoteToken: HIGH_QUOTE,
+                creatorRecipient: creator,
+                buyAmount: 0,
+                feeUse: FeeUses.AUTO_LP
+            })
+        );
+    }
+
+    /// @dev The fixture wires both to the same registry, so a launch still succeeds and the creator's
+    ///      choice lands where the locker will actually spend it.
+    function test_HP08_matchingRegistriesLaunchSucceedsAndCreatorChoiceIsRespected() public {
+        assertEq(launcher.feeUseRegistry(), address(registry));
+        assertEq(locker.feeUseRegistry(), address(registry));
+
+        (address token,,) = _launch(HIGH_QUOTE, FeeUses.AUTO_LP, 0);
+        assertEq(registry.feeUseOf(token), FeeUses.AUTO_LP, "the creator's choice is recorded");
+        assertEq(locker.feeUseRegistry(), address(registry), "and it is the registry the locker spends through");
+    }
+
+    /// @dev A launcher/locker pair that never had a registry wired at all — the state before either
+    ///      `setFeeUseRegistry` call runs — must still be able to launch, exactly as it does on unfixed
+    ///      main: `HydropumpLauncher.launch` already skips `setLaunchFeeUse` whenever its own registry is
+    ///      unset, and the new check only compares the two pointers against each other, not against zero.
+    function test_HP08_bothRegistriesUnsetStillLaunches() public {
+        HydropumpLocker freshLocker = HydropumpLocker(
+            address(
+                new ERC1967Proxy(
+                    address(new HydropumpLocker()),
+                    abi.encodeCall(HydropumpLocker.initialize, (owner, address(0), buyback, CREATOR_FEE, PROTOCOL_FEE))
+                )
+            )
+        );
+        HydropumpLauncher freshLauncher = HydropumpLauncher(
+            address(
+                new ERC1967Proxy(
+                    address(new HydropumpLauncher()),
+                    abi.encodeCall(
+                        HydropumpLauncher.initialize,
+                        (owner, admin, address(freshLocker), address(directory), LAUNCH_FEE)
+                    )
+                )
+            )
+        );
+        vm.prank(owner);
+        freshLocker.setLauncher(address(freshLauncher));
+
+        assertEq(freshLauncher.feeUseRegistry(), address(0), "launcher registry starts unset");
+        assertEq(freshLocker.feeUseRegistry(), address(0), "locker registry starts unset");
+
+        vm.prank(creator);
+        (address token,,) = freshLauncher.launch{value: LAUNCH_FEE}(
+            HydropumpLauncher.LaunchParams({
+                name: "Alpha",
+                symbol: "ALPHA",
+                quoteToken: HIGH_QUOTE,
+                creatorRecipient: creator,
+                buyAmount: 0,
+                feeUse: bytes32(0)
+            })
+        );
+        assertTrue(token != address(0), "launch succeeds with both registries unset");
+    }
 }
