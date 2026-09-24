@@ -8,6 +8,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 
 import {HydropumpLauncher} from "../contracts/core/HydropumpLauncher.sol";
 import {HydropumpLocker} from "../contracts/core/HydropumpLocker.sol";
+import {HydropumpToken} from "../contracts/core/HydropumpToken.sol";
 import {TickMath} from "../contracts/libraries/TickMath.sol";
 import {HydropumpFixture} from "./helpers/HydropumpFixture.sol";
 import {MockAlgebra, MockAlgebraPool} from "./mocks/MockAlgebra.sol";
@@ -209,14 +210,8 @@ contract LaunchCurveTest is HydropumpFixture {
     /// It fails closed. Every band is minted with zero desired on the quote side, so a band that needs quote
     /// is a zero-liquidity position, which the position manager rejects. The launch reverts and the
     /// creator's quote is never touched.
-    ///
-    /// Largely theoretical now: an address comes out of `CREATE` and is not knowable until the launch has
-    /// already happened, so there is no window in which to front-run one. Kept because the failure mode is
-    /// what matters — whatever puts a pool at the wrong price, the launcher must not fund it.
     function test_APoolOpenedBeforeTheLaunchMakesItRevertWithoutTouchingTheQuote() public {
-        // The next `CREATE` from the launcher proxy. Not something a real attacker can compute — which is
-        // the point of the note below — but a test has to be able to set the scenario up.
-        address predicted = vm.computeCreateAddress(address(launcher), vm.getNonce(address(launcher)));
+        address predicted = _nextToken(creator, "Alpha", "ALPHA");
 
         (address token0, address token1) = predicted < HIGH_QUOTE ? (predicted, HIGH_QUOTE) : (HIGH_QUOTE, predicted);
         npm.createAndInitializePoolIfNecessary(token0, token1, address(0), TickMath.getSqrtRatioAtTick(0), "");
@@ -239,6 +234,24 @@ contract LaunchCurveTest is HydropumpFixture {
         vm.stopPrank();
 
         assertEq(IERC20(HIGH_QUOTE).balanceOf(creator), buyAmount, "the creator keeps their quote");
+    }
+
+    /// The launcher's nonce no longer predicts the next launch, so a pool opened there blocks nothing.
+    function test_APoolOpenedAtTheNonceAddressDoesNotBlockALaunch() public {
+        address byNonce = vm.computeCreateAddress(address(launcher), vm.getNonce(address(launcher)));
+        (address token0, address token1) = byNonce < HIGH_QUOTE ? (byNonce, HIGH_QUOTE) : (HIGH_QUOTE, byNonce);
+        npm.createAndInitializePoolIfNecessary(token0, token1, address(0), TickMath.getSqrtRatioAtTick(0), "");
+
+        (address token,,) = _launch(HIGH_QUOTE);
+        assertTrue(token != byNonce);
+    }
+
+    function _nextToken(address sender, string memory name, string memory symbol) internal returns (address) {
+        vm.warp(vm.getBlockTimestamp() + 1);
+        bytes memory initCode =
+            abi.encodePacked(type(HydropumpToken).creationCode, abi.encode(name, symbol, launcher.SUPPLY()));
+        bytes32 salt = keccak256(abi.encode(sender, vm.getBlockTimestamp()));
+        return vm.computeCreate2Address(salt, keccak256(initCode), address(launcher));
     }
 
     /// `QuoteConsumed` cannot fire through the position manager — every mint passes zero on the quote side,

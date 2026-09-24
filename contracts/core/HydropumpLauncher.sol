@@ -174,7 +174,9 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
         if (directory == address(0)) revert DirectoryUnset();
         if (feeUseRegistry != IHydropumpLocker(locker).feeUseRegistry()) revert FeeUseRegistryMismatch();
 
-        token = address(new HydropumpToken(params.name, params.symbol, SUPPLY));
+        // CREATE2 keyed to sender and time, so the address cannot be read off the launcher's nonce and pre-poisoned.
+        bytes32 salt = keccak256(abi.encode(msg.sender, block.timestamp));
+        token = address(new HydropumpToken{salt: salt}(params.name, params.symbol, SUPPLY));
 
         bool isToken0 = token < params.quoteToken;
         int24 startTick = IPairDirectory(directory).requirePoolStartTick(token, params.quoteToken);
