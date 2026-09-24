@@ -149,6 +149,7 @@ abstract contract HydropumpFixture is Test {
             vm.prank(creator);
             IERC20(quoteToken).approve(address(launcher), buyAmount);
         }
+        vm.warp(vm.getBlockTimestamp() + 1); // one launch per sender per second
         vm.prank(creator);
         (token, pool, positionIds) = launcher.launch{value: LAUNCH_FEE}(
             HydropumpLauncher.LaunchParams({

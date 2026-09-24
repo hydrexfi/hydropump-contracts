@@ -145,6 +145,7 @@ contract LaunchCurveForkTest is ForkFixture {
             }
             _registerQuote(q.token, q.startTick);
 
+            vm.warp(vm.getBlockTimestamp() + 1);
             vm.prank(creator);
             try launcher.launch{value: LAUNCH_FEE}(
                 HydropumpLauncher.LaunchParams({

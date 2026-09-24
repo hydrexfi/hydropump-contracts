@@ -8,6 +8,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 
 import {HydropumpLauncher} from "../../../contracts/core/HydropumpLauncher.sol";
 import {HydropumpLocker} from "../../../contracts/core/HydropumpLocker.sol";
+import {HydropumpToken} from "../../../contracts/core/HydropumpToken.sol";
 import {PairDirectory} from "../../../contracts/helpers/PairDirectory.sol";
 import {FeeUseRegistry} from "../../../contracts/helpers/FeeUseRegistry.sol";
 import {CreatorBalanceFeeUse} from "../../../contracts/feeuses/CreatorBalanceFeeUse.sol";
@@ -44,6 +45,7 @@ abstract contract ForkFixture is Test {
 
     PairDirectory internal directory;
     HydropumpLauncher internal launcher;
+    uint256 private _lastLaunchAt;
     HydropumpLocker internal locker;
     FeeUseRegistry internal registry;
     CreatorBalanceFeeUse internal creatorBalance;
@@ -144,22 +146,21 @@ abstract contract ForkFixture is Test {
         directory.configureQuoteTokens(tokens, enabled, ticks);
     }
 
-    /// @dev Arranges the launcher so its next `CREATE` lands on the requested side of `quoteToken`.
-    ///
-    ///      A launch address is no longer chosen by anything — not a salt, not the sender, not the name.
-    ///      It falls out of the launcher's own nonce. So a test that means to exercise one orientation
-    ///      winds that nonce forward until the address it would produce sorts the right way, rather than
-    ///      searching for an account or burning real launches to get there.
+    /// @dev Warps until `creator`'s next launch lands on the requested side of `quoteToken`.
     function _arrangeSide(address quoteToken, bool wantToken0) internal {
-        uint64 nonce = vm.getNonce(address(launcher));
-        for (uint64 i = 0; i < 256; i++) {
-            address next = vm.computeCreateAddress(address(launcher), nonce + i);
+        bytes32 initCodeHash = keccak256(
+            abi.encodePacked(type(HydropumpToken).creationCode, abi.encode("Alpha", "ALPHA", launcher.SUPPLY()))
+        );
+        uint256 t = vm.getBlockTimestamp();
+        for (uint256 i = 1; i <= 256; i++) {
+            address next =
+                vm.computeCreate2Address(keccak256(abi.encode(creator, t + i)), initCodeHash, address(launcher));
             if ((next < quoteToken) == wantToken0) {
-                vm.setNonce(address(launcher), nonce + i);
+                vm.warp(t + i);
                 return;
             }
         }
-        revert("no nonce within reach lands on that side");
+        revert("no timestamp within reach lands on that side");
     }
 
     function _launchFrom(address account, address quoteToken, bytes32 feeUse, uint256 buyAmount)
@@ -171,6 +172,8 @@ abstract contract ForkFixture is Test {
             vm.prank(account);
             IERC20(quoteToken).approve(address(launcher), buyAmount);
         }
+        if (vm.getBlockTimestamp() == _lastLaunchAt) vm.warp(vm.getBlockTimestamp() + 1);
+        _lastLaunchAt = vm.getBlockTimestamp();
         vm.prank(account);
         (token, pool, positionIds) = launcher.launch{value: LAUNCH_FEE}(
             HydropumpLauncher.LaunchParams({

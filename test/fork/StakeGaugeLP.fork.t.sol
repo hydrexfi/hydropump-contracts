@@ -14,7 +14,6 @@ import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.s
 contract StakeGaugeLPForkTest is Test {
     IGauge internal constant GAUGE = IGauge(HydropumpAddresses.GAUGE);
     IERC20 internal constant PAIR = IERC20(HydropumpAddresses.GAUGE_PAIR);
-    address internal constant DEPLOYER = 0x2ccDf18b0cBbdB7272be8a49C42bA3e76A7f813D;
 
     StakeGaugeLP internal script;
     bool internal forked;
@@ -32,18 +31,10 @@ contract StakeGaugeLPForkTest is Test {
             vm.skip(true);
         }
 
-        uint256 lp = PAIR.balanceOf(DEPLOYER);
-        if (lp == 0) {
-            // Already staked on-chain; nothing left to exercise.
-            assertGt(GAUGE.balanceOf(DEPLOYER), 0, "LP is neither held nor staked");
-            return;
-        }
-
+        uint256 lp = 1e18;
+        deal(address(PAIR), address(script), lp); // live deployer balance has moved on; don't depend on it
         uint256 gaugeSupplyBefore = GAUGE.totalSupply();
 
-        // Run the script's own logic as the deployer.
-        vm.prank(DEPLOYER, DEPLOYER);
-        PAIR.transfer(address(script), lp);
         uint256 staked = script.stake(address(script));
 
         assertEq(staked, lp);
@@ -61,12 +52,8 @@ contract StakeGaugeLPForkTest is Test {
             vm.skip(true);
         }
 
-        uint256 lp = PAIR.balanceOf(DEPLOYER);
-        if (lp > 0) {
-            vm.prank(DEPLOYER, DEPLOYER);
-            PAIR.transfer(address(script), lp);
-            script.stake(address(script));
-        }
+        deal(address(PAIR), address(script), 1e18);
+        script.stake(address(script));
 
         // Emissions only flow after a vote and a distribution, so this just confirms the accounting
         // surface is live rather than asserting a non-zero number.
