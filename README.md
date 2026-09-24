@@ -188,17 +188,17 @@ Both pair orderings are exercised throughout, because which one a launch gets is
 
 | | |
 | --- | --- |
-| `PairDirectory` | `0x86F4Ff7b66De9fB8580DB4892c40514479828B6A` |
-| `HydropumpLauncher` | `0xB4209c5D03bA37f63e495d951EFc017f6332f5aE` |
-| `HydropumpLocker` | `0xe1137758d2168617cfa7C8103cbF935f5b1DB1E5` |
-| `FeeUseRegistry` | `0x665B8666693dC6154E3BAACBA739df66b29D300D` |
-| `CreatorBalanceFeeUse` | `0x51851B4ddc4457b5023b332B413dFFf8967a6fb9` |
-| `AutoLpFeeUse` | `0xB2bA61dF25e6D7DB73FaD75075ed8E92F0Eb0cfE` |
-| `BuybackBurnFeeUse` | `0xA1079f4B5A8f1568dc09CFC5E6e22d67cDDAcc14` |
-| `HydropumpBuyback` | `0xe3cD62d4dC36D0e751D1C4AC6a6Fc22d632e611a` |
-| `HydropumpRewardDistributor` | `0x24533D77817e65901003b79D0529eDA88098371d` |
+| `PairDirectory` | `0xc06e27984c25B4C14D8e36091E633690206Da715` |
+| `HydropumpLauncher` | `0x0102B7c2C293CaA425994f0D8F930eccB216965d` |
+| `HydropumpLocker` | `0x1b5D6B9836E07aDCB5CBabA218E5EeE3fE2f21F5` |
+| `FeeUseRegistry` | `0xcd12D1E35f1957DB330492BbD8CAa1887500eD12` |
+| `CreatorBalanceFeeUse` | `0xfd2ef93dF03f536B1afD798a1ABAA8a5361e6A4e` |
+| `AutoLpFeeUse` | `0xe81d8f8415C8e1393bb0F5f059aF87C2bf523063` |
+| `BuybackBurnFeeUse` | `0x890c74027E6DC27A019d39329313ecc50064fd30` |
+| `HydropumpBuyback` | `0x104326575BCce86129933842D59BE172AD57b5e6` |
+| `HydropumpRewardDistributor` | `0x346bD6Ca0eBa1de331219B52C0903C03Ee86e0b9` |
 
-Deployed at block `51444026`. Indexed by `hydrex-dummy/0.2.0`.
+Deployed at block `51748534`. Indexed by `hydrex-dummy/0.6.0`.
 
 ## Deploy
 
@@ -221,6 +221,10 @@ future launch's liquidity, so it sits with the Safe.
 
 The locker is deployed under the deployer so it can be wired to the launcher, then handed to the admin.
 That transfer is `Ownable2Step`, so accept it from the Safe afterwards.
+
+After the first quote registration, directory ownership goes to the backend key that runs the reprice cron
+(`0x1681b1d40AB2fb81F8a1dd28b56baFfbB869a214`, also `HYDROPUMP_OPERATOR`), which accepts it with
+`acceptOwnership()`.
 
 ## Quote tokens
 
