@@ -1,7 +1,7 @@
 # Recipient and registry checks — run report
 
-Issue: [#10](https://github.com/hydrexfi/hydropump-contracts/issues/10) — "Reject the locker or registry
-as creator recipient, and mismatched registries at launch (HP-11, HP-08)"
+Issue: [#10](https://github.com/hydrexfi/hydropump-contracts/issues/10) — rejecting the locker or the
+registry as a creator recipient (HP-11), and rejecting mismatched registries at launch (HP-08).
 Branch: `fix/recipient-and-registry-checks`
 
 ## What happened, for someone who wasn't here
@@ -19,9 +19,9 @@ their behalf — the creator's payout would be sent to the locker, which would t
 right back to the same launch's own ledger instead of paying anyone. And because only the current
 recipient is allowed to change the recipient, and the recipient was now the locker, nobody could ever fix
 it: the money was stuck for good. The same trap existed if the recipient was set to the fee-routing
-registry instead of the locker. This was finding HP-11 in the review (rated Low). The fix rejects both of
-those addresses as a recipient, both when a token is first launched and any time the recipient is changed
-later.
+registry instead of the locker. The review rated this a Low-severity finding (HP-11). The fix rejects both
+of those addresses as a recipient, both when a token is first launched and any time the recipient is
+changed later.
 
 **The second gap: a creator's chosen fee routing could get silently ignored.** Two different contracts
 each keep their own note of which fee-routing registry to use: the launcher (which records what a creator
@@ -31,8 +31,9 @@ someone updated one during a deployment and forgot the other. If that happened, 
 "add my fees back into the pool automatically") would be written down in the launcher's registry, but the
 locker would never look there — it would just fall back to whatever the default choice is in its own,
 different registry. Nothing would be lost, but the creator's actual choice would be quietly overridden.
-This was finding HP-08 (also rated Low). The fix makes launching a new token fail loudly if the two
-registries disagree, so the mismatch gets caught immediately instead of silently misrouting fees later.
+The review also rated this a Low-severity finding (HP-08). The fix makes launching a new token fail loudly
+if the two registries disagree, so the mismatch gets caught immediately instead of silently misrouting
+fees later.
 
 Both fixes are small, targeted, and change no stored data — they only add new checks. The production
 deployment planned for Friday 25 September 2026 can include them as-is.
@@ -65,11 +66,11 @@ all eight tests in the file pass. Committed as `0ce41b5`.
 One existing test, `test_LaunchingStillWorksWithNoEscrowSet` in `test/HydropumpLauncher.t.sol`, broke
 under the new check and needed rewriting rather than just patching around. It had been testing that a
 launcher with no registry set could still launch, even while the locker already had one configured — but
-that is exactly the mismatch HP-08 closes: the launcher would go on to launch without ever writing the
-creator's choice anywhere, silently falling back to the locker's own default. Per this repo's rule against
-weakening a test to make it pass, the test was renamed
+that is exactly the registry-divergence trap this fix closes (HP-08): the launcher would go on to launch
+without ever writing the creator's choice anywhere, silently falling back to the locker's own default. Per
+this repo's rule against weakening a test to make it pass, the test was renamed
 `test_ZeroingOnlyTheLaunchersEscrowNowRevertsAsADivergence` and now asserts the safe behaviour: that
-launch reverts. This was included in the same commit as the HP-08 fix.
+launch reverts. This was included in the same commit as the registry-mismatch fix (HP-08).
 
 **3. Gates and fork suite.** All local gates pass on the final state: `forge build --sizes`, `npm run
 test:unit` (235/235), `npm run fmt:check`, and `npm run check:storage-snapshots`. The full fork suite
@@ -163,8 +164,9 @@ always does), it can never be set back to `address(0)` — the setter rejects th
 before writing the test rather than after a failed run, but it's worth naming because the first instinct
 was to try to zero out the shared fixture's locker registry, which is not something the contract allows.
 
-The `npm run check:storage-snapshots` check failed once, right after the HP-08 fix, with `forge inspect
-failed: storage layout missing from artifact`. That looked like a real storage problem for a moment. It
+The `npm run check:storage-snapshots` check failed once, right after the registry-mismatch fix (HP-08),
+with `forge inspect failed: storage layout missing from artifact`. That looked like a real storage problem
+for a moment. It
 was a stale build-artifact cache from an interrupted intermediate build, not a real layout change — a
 `forge clean` and rebuild made it pass cleanly, and neither contract's storage actually changed (confirmed
 by inspecting the diff: no new state variables, `__gap` untouched in both files).
@@ -184,8 +186,8 @@ by inspecting the diff: no new state variables, `__gap` untouched in both files)
 **Interface change:** `IHydropumpLocker` gained `feeUseRegistry() external view returns (address)`,
 matching the public state variable `HydropumpLocker` already exposed.
 
-**Test file:** `test/RecipientAndRegistryChecks.t.sol` (new), 8 tests — 5 for HP-11, 3 for HP-08 — plus
-one rewritten test in `test/HydropumpLauncher.t.sol`.
+**Test file:** `test/RecipientAndRegistryChecks.t.sol` (new), 8 tests — 5 for the recipient check
+(HP-11), 3 for the registry check (HP-08) — plus one rewritten test in `test/HydropumpLauncher.t.sol`.
 
 **Known fork failures, unrelated to this change and excluded by name from the "Done when" fork run, both
 before and after the fix, with the same messages both times:**

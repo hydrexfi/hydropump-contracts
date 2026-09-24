@@ -12,3 +12,5 @@
 15:48  NOTE  code-reviewer verdict: APPROVE WITH NITS, nothing above LOW; one LOW noted (creatorRecipient guard does not cover fee-use implementation addresses) matches the work order's declared out-of-scope item verbatim, no action needed
 15:48  DONE  item 3 — gates and fork suite all green: forge build --sizes clean, npm run test:unit 235/235, npm run fmt:check clean, npm run check:storage-snapshots clean, npm run test:fork:strict (3 known failures excluded) 57/57
 15:48  NOTE  COST wall clock 0 h 36 min, $0.00 model spend
+15:50  DONE  pushed fix/recipient-and-registry-checks to origin and opened PR #13 (https://github.com/hydrexfi/hydropump-contracts/pull/13), body says Closes #10 and links RUN-REPORT-recipient-registry-checks.md on the branch
+16:04  NOTE  done-check veto 1
