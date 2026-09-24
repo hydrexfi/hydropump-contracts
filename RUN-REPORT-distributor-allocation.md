@@ -8,9 +8,10 @@ them. The owner has a function, `setAllocation`, to correct a mistaken allocatio
 fix, that function had a bug: if a recipient had already claimed their allocation and the owner
 then tried to lower it, the function would instead hand them a fresh top-up equal to the new
 number. So an owner trying to reduce someone from 100 to 10 would, after that person had already
-claimed their 100, accidentally let them claim another 10 on top. In the security review of
-23 September 2026 this was labelled HP-07, rated Low severity, because it only happens when the
-owner makes exactly the kind of correction an honest owner would make.
+claimed their 100, accidentally let them claim another 10 on top. The security review of
+23 September 2026 labelled this the reduction-after-claim bug in `setAllocation` (HP-07), rated
+Low severity, because it only happens when the owner makes exactly the kind of correction an
+honest owner would make.
 
 The fix changes what the numbers passed to `setAllocation` mean. Before, they meant "how much is
 still claimable." Now they mean "this recipient's total allocation over the contract's whole
@@ -23,8 +24,8 @@ instead of quietly re-crediting them.
 A second, unrelated fix went in the same run: `setOperator`, which lets the owner change who is
 allowed to write allocations, had no check against the zero address. Setting the operator to the
 zero address would have locked out the only address (besides the owner) that can call `allocate`,
-so new rewards could no longer be posted. This was HP-20, also Low. It now reverts if asked to
-set the operator to the zero address.
+so new rewards could no longer be posted. This is the missing zero-address check in `setOperator`
+(HP-20), also Low. It now reverts if asked to set the operator to the zero address.
 
 Both fixes are in `contracts/core/HydropumpRewardDistributor.sol`, which is not behind a proxy —
 it will simply be redeployed as part of the production deployment planned for Friday 25 September
@@ -130,16 +131,17 @@ review ran on this session's own allowance, per the work order's spend rule.
 1. **Tell Garrett** about the `setAllocation` meaning change (above) before Friday's deployment —
    this is the one risk that actually matters here.
 2. **HydropumpBuyback.sol:128** has the same missing-zero-address-check shape in its own
-   `setOperator` as HP-20 had here. It's a different contract and out of scope for this work
-   order, but worth its own small fix if the review didn't already flag it there under a
-   different HP number.
+   `setOperator` as the one just fixed here (HP-20). It's a different contract and out of scope
+   for this work order, but worth its own small fix if the review didn't already flag it there
+   under a different HP number.
 3. Nothing else — the code-reviewer's one nit is cosmetic and doesn't change behaviour or
    coverage in a way worth a follow-up.
 
 ## Where I was wrong during the run
 
-- My first commit message for the HP-07 fix stated "ten sites in this repo call setAllocation"
-  without having actually searched for it — a number I made up rather than derived, which is
+- My first commit message for the `setAllocation` lifetime-total fix (HP-07) stated "ten sites in
+  this repo call setAllocation" without having actually searched for it — a number I made up
+  rather than derived, which is
   exactly what `CLAUDE.md`'s commit-hygiene rule (take the count from a search, not from the
   flagged line) exists to prevent. I caught this before pushing, ran `grep -rn "setAllocation"`,
   found 5 call sites (all tests, not "ten" of anything), and amended the not-yet-pushed commit

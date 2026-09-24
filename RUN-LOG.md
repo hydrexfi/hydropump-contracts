@@ -18,3 +18,5 @@
 14:40  DONE  PR opened — https://github.com/hydrexfi/hydropump-contracts/pull/11, linked with Closes #9
 14:44  DONE  CI green on latest commit (run 36000582226): unit tests, build/sizes/format, storage-layout-snapshots all pass
 14:48  DONE  CI green on final pushed commit dff2847 (run 36001028514): build/sizes/format, storage-layout-snapshots, unit tests all pass — done-check criteria satisfied, no further pushes planned
+14:49  NOTE  done-check veto 1
+14:50  NOTE  done-check refused: local commit unpushed, and bare HP-07/HP-20 labels in report + PR body (plain name must precede bracketed label). Fixed report wording, updated PR body via gh pr edit, pushing now.
