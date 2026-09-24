@@ -32,6 +32,7 @@ contract HydropumpRewardDistributor is Ownable2Step {
     error ZeroAddress();
     error LengthMismatch();
     error NothingAllocated();
+    error AllocationExceedsBalance();
 
     modifier onlyOperator() {
         if (msg.sender != operator && msg.sender != owner()) revert NotOperator();
@@ -104,17 +105,22 @@ contract HydropumpRewardDistributor is Ownable2Step {
     //////////////////////////////////////////////////////////////*/
 
     function setOperator(address newOperator) external onlyOwner {
+        if (newOperator == address(0)) revert ZeroAddress();
+
         emit OperatorUpdated(operator, newOperator);
         operator = newOperator;
     }
 
-    /// @notice Overwrite what recipients are owed, to whatever the owner says — including nothing.
+    /// @notice Overwrite what recipients can still claim, to whatever the owner says — including nothing.
+    /// @dev Reverts if the call raises `totalOwed` above the balance; reductions always go through.
     function setAllocation(address token, address[] calldata recipients, uint256[] calldata amounts)
         external
         onlyOwner
     {
         if (token == address(0)) revert ZeroAddress();
         if (recipients.length != amounts.length) revert LengthMismatch();
+
+        uint256 owedBefore = totalOwed[token];
 
         for (uint256 i = 0; i < recipients.length; i++) {
             if (recipients[i] == address(0)) revert ZeroAddress();
@@ -124,6 +130,11 @@ contract HydropumpRewardDistributor is Ownable2Step {
             totalOwed[token] = totalOwed[token] - previous + amounts[i];
 
             emit AllocationSet(token, recipients[i], previous, amounts[i]);
+        }
+
+        uint256 owedAfter = totalOwed[token];
+        if (owedAfter > owedBefore && owedAfter > IERC20(token).balanceOf(address(this))) {
+            revert AllocationExceedsBalance();
         }
     }
 

@@ -220,6 +220,73 @@ contract HydropumpRewardDistributorTest is Test {
         assertEq(hydx.balanceOf(address(distributor)), 100e18, "and no tokens moved");
     }
 
+    /// After a claim, "reducing" to 10 would re-open a payout the contract does not hold.
+    function test_ACorrectionAfterAClaimCannotPromiseUnheldTokens() public {
+        _one(address(hydx), alice, 100e18);
+        vm.prank(alice);
+        distributor.claim(address(hydx));
+
+        address[] memory recipients = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        (recipients[0], amounts[0]) = (alice, 10e18);
+
+        vm.prank(owner);
+        vm.expectRevert(HydropumpRewardDistributor.AllocationExceedsBalance.selector);
+        distributor.setAllocation(address(hydx), recipients, amounts);
+
+        assertEq(distributor.claimable(alice, address(hydx)), 0, "the failed call changed nothing");
+    }
+
+    /// A raise moves no tokens in, so one the balance cannot cover is refused.
+    function test_ARaiseBeyondWhatIsHeldReverts() public {
+        _one(address(hydx), alice, 100e18);
+
+        address[] memory recipients = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        (recipients[0], amounts[0]) = (alice, 150e18);
+
+        vm.prank(owner);
+        vm.expectRevert(HydropumpRewardDistributor.AllocationExceedsBalance.selector);
+        distributor.setAllocation(address(hydx), recipients, amounts);
+
+        assertEq(distributor.claimable(alice, address(hydx)), 100e18, "the failed call changed nothing");
+    }
+
+    /// A raise is fine once the tokens are there, however they arrived.
+    function test_ARaiseCoveredByTheBalanceIsAllowed() public {
+        _one(address(hydx), alice, 100e18);
+        hydx.mint(address(distributor), 50e18); // sent in directly, outside allocate
+
+        address[] memory recipients = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        (recipients[0], amounts[0]) = (alice, 150e18);
+
+        vm.prank(owner);
+        distributor.setAllocation(address(hydx), recipients, amounts);
+
+        assertEq(distributor.claimable(alice, address(hydx)), 150e18);
+        assertEq(distributor.totalOwed(address(hydx)), 150e18);
+        vm.prank(alice);
+        assertEq(distributor.claim(address(hydx)), 150e18, "and it pays in full");
+    }
+
+    /// Lowering what is owed is allowed even while the contract is short.
+    function test_AReductionIsAllowedWhileTheContractIsShort() public {
+        _allocate(address(hydx), alice, 30e18, bob, 70e18);
+        vm.prank(owner);
+        distributor.emergencyWithdraw(address(hydx), owner, 100e18);
+
+        address[] memory recipients = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        (recipients[0], amounts[0]) = (alice, 0);
+
+        vm.prank(owner);
+        distributor.setAllocation(address(hydx), recipients, amounts);
+
+        assertEq(distributor.claimable(alice, address(hydx)), 0);
+        assertEq(distributor.totalOwed(address(hydx)), 70e18, "bob's 70 is still owed, and still short");
+    }
+
     /// A cancelled allocation cannot be claimed, and what it freed is withdrawable.
     function test_ClawbackThenWithdraw() public {
         _allocate(address(hydx), alice, 30e18, bob, 70e18);
@@ -272,5 +339,14 @@ contract HydropumpRewardDistributorTest is Test {
         vm.prank(owner);
         distributor.setOperator(stranger);
         assertEq(distributor.operator(), stranger);
+    }
+
+    /// `setOperator` refuses the zero address.
+    function test_SetOperatorRejectsZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(HydropumpRewardDistributor.ZeroAddress.selector);
+        distributor.setOperator(address(0));
+
+        assertEq(distributor.operator(), operator, "unchanged");
     }
 }
