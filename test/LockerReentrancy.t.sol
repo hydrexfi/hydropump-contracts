@@ -218,6 +218,9 @@ contract LockerReentrancyTest is HydropumpFixture {
 
         assertEq(locker.creatorOwed(attackerLaunch, HIGH_QUOTE), 0, "nothing was re-booked to the attacker");
 
+        // Disarmed and spent again. With nothing re-booked there is nothing left owed, so this second
+        // call returns early and pays nothing — which is the point. On the unfixed contract it paid out
+        // the victim's fees.
         hook.arm(0, address(0));
         locker.spendCreatorShare(attackerLaunch);
         assertEq(
@@ -261,9 +264,31 @@ contract LockerReentrancyTest is HydropumpFixture {
         _assertSolvent("the locker never books more than it holds");
     }
 
-    /// @dev Even with a hooked quote and a dev buy, `launch()` moves the quote only to the launcher, the
-    ///      router's pool and the locker; the creator receives the LAUNCH token, which has no hook. So the
-    ///      creator's contract never gets control during `launch()`, and there is nothing to re-enter with.
+    /// @dev `deliverProtocolShareFromSelf` is the one entry point that moves tokens without a guard of its
+    ///      own, so its access check is the only thing keeping an unguarded convert-and-sweep off the
+    ///      public surface. Both halves of that check are exercised here: a caller that is not the locker,
+    ///      and the locker itself with no guard held. The path that is meant to work — `handleAllRewards`
+    ///      reaching it from inside its own guard — is covered by `test/FeeUses.t.sol`, which asserts
+    ///      `protocolOwed` reaches zero and the quote reaches the buyback after that call.
+    function test_deliverProtocolShareFromSelf_refusesEveryCallerAndEveryUnguardedFrame() public {
+        vm.expectRevert(HydropumpLocker.NotGuardedSelfCall.selector);
+        locker.deliverProtocolShareFromSelf(attackerLaunch);
+
+        vm.prank(stranger);
+        vm.expectRevert(HydropumpLocker.NotGuardedSelfCall.selector);
+        locker.deliverProtocolShareFromSelf(attackerLaunch);
+
+        // The locker's own address, but from a frame where no entry point is holding the guard.
+        vm.prank(address(locker));
+        vm.expectRevert(HydropumpLocker.NotGuardedSelfCall.selector);
+        locker.deliverProtocolShareFromSelf(attackerLaunch);
+    }
+
+    /// @dev Even with a hooked quote and a dev buy, `launch()` never gives the creator's contract the quote:
+    ///      it moves from the creator to the launcher, then through the router into the pool. The creator
+    ///      receives the LAUNCH token, which has no hook, and the locker receives position NFTs, not quote.
+    ///      So the creator's contract never gets control during `launch()`, and there is nothing to
+    ///      re-enter with.
     function test_launchNeverHandsTheCreatorControl_evenWithAHookedQuote() public {
         CountingCreator c = new CountingCreator();
         uint256 buy = 1e15;
@@ -330,6 +355,8 @@ contract HostileFeeUseReentrancyTest is HydropumpFixture {
         vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
         locker.spendCreatorShare(spentLaunch);
 
+        // The revert above already rolls both of these back; they are here to state the promise the
+        // revert is keeping, which is that a refused spend strands nobody's money.
         assertEq(locker.creatorOwed(victimLaunch, LOW_QUOTE), victimOwedBefore, "the victim's share is untouched");
         assertEq(locker.creatorOwed(spentLaunch, LOW_QUOTE), spentOwedBefore, "and the spent share stays booked");
         _assertSolvent("the locker never books more than it holds");

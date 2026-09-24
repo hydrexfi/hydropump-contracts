@@ -17,3 +17,13 @@
 15:12  NOTE  done-check waiting: 2 background tasks running (Run fork suite excluding the three known failures; fork suite pass/fail signals); not counted as a veto
 15:12  DONE  queue 2 fork gate — npm run test:fork:strict with the three known failures excluded by name: 11 suites, 57 passed, 0 failed, 0 skipped, against Base. Includes test_HandleAllRewardsDoesTheWholeThingInOneCall on a real Algebra pool, the path the guard was most likely to break
 15:12  NOTE  strengthened one assertion in test_hookedQuote_sweepDuringSpendOnlyAffectsTheAttackersOwnSpend after that run: 'victim still paid' (assertGt, would pass on 1 wei) became 'paid in full' (assertEq against its booked creatorOwed). Test-file only; the fork suite does not execute this file
+15:13  DONE  committed 1d62b07 fix(locker): guard every entry point against reentrancy [HP-02] — contract, new test file, README correction and the log
+15:14  START  review — code-reviewer on the committed diff (1d62b07), before opening the PR
+15:26  NOTE  done-check waiting: 1 background task running (Review the locker reentrancy fix); not counted as a veto
+15:29  DONE  review — code-reviewer verdict CHANGES REQUESTED: 1 MEDIUM (the new self-only entry point's access check had no test), 3 LOW, 4 NIT. It also corrected me: test/FeeUses.t.sol asserts protocolOwed == 0 and quote reaching the buyback after handleAllRewards, so the swallowed-guard trap I described as silent would in fact have gone red in the unit suite
+15:29  START  review fixes — MEDIUM plus all three LOWs
+15:34  NOTE  the stale-artifact storage-check failure happened a second time, again right after editing only the locker, and again cleared by 'forge clean && forge build'. It is reproducible, not a one-off: an incremental rebuild of that one file leaves the storage layout out of the artifact. CI builds clean so it cannot hit this. Out of scope to fix here; recorded in the report
+15:50  NOTE  done-check waiting: 2 background tasks running (Final fork run on the reviewed tree; final fork suite pass/fail signals); not counted as a veto
+15:50  DONE  review fixes — fork gate re-run on the reviewed tree: 11 suites, 57 passed, 0 failed, 0 skipped against Base, three known failures excluded by name
+15:51  NOTE  gas after the review fixes (one extra TLOAD in the self-only check): handleAllRewards avg 585216 -> 586060, +844 (+0.14%); median 568730 -> 569558. handleCreatorRewards +379, handleProtocolRewards -1100, splitRewards +447, spendCreatorShare +456. Locker runtime 10,760 -> 10,999 B
+15:51  NOTE  COST wall clock 1 h 54 min, $0.00 model spend

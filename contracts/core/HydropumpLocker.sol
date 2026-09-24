@@ -23,6 +23,10 @@ import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
 ///      use handed back from how much the locker's balance rose while the fee use ran, and any other
 ///      launch's fees arriving inside that window would be booked twice. The guard keeps its flag in
 ///      transient storage, so it takes no storage slot and the layout is unchanged.
+///
+///      One exception, `deliverProtocolShareFromSelf`, carries no guard of its own because it exists to
+///      be called from inside one. It refuses any caller but this contract, and refuses even this
+///      contract unless a guard is already held.
 contract HydropumpLocker is
     Initializable,
     Ownable2StepUpgradeable,
@@ -123,7 +127,7 @@ contract HydropumpLocker is
     error InvalidFeeSplit();
     error RegistryUnset();
     error UnknownFeeUse();
-    error NotSelf();
+    error NotGuardedSelfCall();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -416,15 +420,18 @@ contract HydropumpLocker is
         return _deliverProtocolShare(token);
     }
 
-    /// @notice The same delivery, callable only by this contract.
+    /// @notice The same delivery, callable only by this contract and only from inside a guarded call.
     /// @dev `handleAllRewards` makes the protocol half best-effort, and `try` needs a real external call to
     ///      get a frame it can roll back. Calling `deliverProtocolShare` would hit the guard
-    ///      `handleAllRewards` is already holding and be swallowed by the `catch`, silently never
-    ///      delivering — so the self-call goes through this unguarded twin instead. It is not a hole: the
-    ///      only way to reach it is from a `nonReentrant` entry point of this contract, because nothing
-    ///      else can make `msg.sender` this address.
+    ///      `handleAllRewards` is already holding and be swallowed by the `catch`, never delivering — so
+    ///      the self-call goes through this unguarded twin instead.
+    ///
+    ///      Precondition, checked rather than argued: `msg.sender` is this contract AND the reentrancy
+    ///      guard is currently held. The second half is what makes "this only ever runs inside a guarded
+    ///      frame" a property of this function rather than of the rest of the file — a later upgrade that
+    ///      adds a second self-call, a fallback, or an `onFees` to the locker cannot quietly widen it.
     function deliverProtocolShareFromSelf(address token) external returns (uint256 delivered) {
-        if (msg.sender != address(this)) revert NotSelf();
+        if (msg.sender != address(this) || !_reentrancyGuardEntered()) revert NotGuardedSelfCall();
         return _deliverProtocolShare(token);
     }
 
