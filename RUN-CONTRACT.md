@@ -31,7 +31,8 @@ rule working. Log it and move on; do not reason your way past it.
    npm run fmt:check
    npm run check:storage-snapshots
    ```
-   And `npm run test:fork:strict` before any commit that changes `contracts/`. If the work order lists
+   And `npm run test:fork:strict` before any commit that changes `contracts/`, plus `npm run test:fork:slow`
+   if the commit changes the launcher, the launch curve or the quote list. If the work order lists
    known fork failures on `main`, exclude exactly those by name (`-- --no-match-test '<names>'`) and
    confirm in the report that they still fail with the same messages. Any other fork failure is yours.
 

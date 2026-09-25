@@ -16,16 +16,19 @@ Findings labelled `HP-01` … `HP-23` refer to the internal security review of 2
 | Build and size check | `forge build --sizes` |
 | Unit tests | `npm run test:unit` |
 | Fork tests | `npm run test:fork:strict` — needs `BASE_RPC_URL`; fails if the RPC is not Base or any test skips (see below) |
+| Slow fork tests | `npm run test:fork:slow` — `test/fork/slow/` only, about 14 minutes; set `FOUNDRY_ETH_RPC_TIMEOUT=300` |
 | Format check | `npm run fmt:check` (fix with `forge fmt`) |
 | Storage layouts | `npm run check:storage-snapshots` |
 
-CI (`.github/workflows/ci.yml`) runs build, unit, format and storage checks on every PR. It does **not** run
-the fork tests yet (the public RPC rate-limits them; a private one needs an admin-set secret), so run
-`npm run test:fork:strict` locally before pushing any change under `contracts/`.
+CI (`.github/workflows/ci.yml`) runs build, unit, format, storage and fork checks on every PR. The fork job
+uses the `BASE_RPC_URL` repository secret and skips `test/fork/slow/`. Those suites launch against every
+generated quote token, so run them by hand (`fork-slow.yml` in the Actions tab, or `npm run test:fork:slow`)
+after changing the quote list, the launch curve or the launcher. When every failure was an RPC timeout or
+rate limit, the fork wrapper says so and exits 3; re-run rather than debug the code.
 
 **Fork tests do not fail without an RPC.** When `BASE_RPC_URL` is unset, every fork suite marks its
 tests skipped (`vm.skip`), so a run can finish green having tested nothing. Each suite has its own guard;
-five of the nine share `test/fork/helpers/ForkFixture.sol`. Foundry loads `.env` automatically. The public
+eight of the twelve share `test/fork/helpers/ForkFixture.sol`. Foundry loads `.env` automatically. The public
 endpoint in `.env.example` is rate-limited too hard for the full fork suite; put a private RPC URL in
 `.env` (never in `.env.example`, which is tracked). `npm run test:fork:strict` refuses to pass
 unless the RPC answers as Base (chain id 8453) and nothing was skipped; use it rather than `test:fork`

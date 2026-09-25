@@ -1,0 +1,33 @@
+name: slow fork tests
+
+# The fork suites under test/fork/slow/ (about 14 minutes), run by hand from the Actions tab. See CLAUDE.md.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fork-slow:
+    name: slow fork tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+      - run: npm ci
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+      - name: Run slow fork tests
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          FOUNDRY_ETH_RPC_TIMEOUT: 300
+        run: npm run test:fork:slow

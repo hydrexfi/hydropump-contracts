@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # Run the fork suites and fail unless they really forked.
 #
+#   forkTestStrict.sh [--slow] [forge args...]    (--slow: only test/fork/slow/; default: everything else)
+#
 # Without a working BASE_RPC_URL every fork test skips instead of failing, so `forge test` exits 0
 # having tested nothing. This wrapper fails when:
 #   - BASE_RPC_URL does not answer as Base (chain id 8453), or
 #   - forge exits non-zero (a test failed), or
 #   - any test was skipped.
+#
+# Exit codes: 0 pass; 3 every failure was the RPC (a timeout, a rate limit or a dropped connection)
+# rather than the code; any other non-zero code, a real failure. The RPC URL is redacted from the output.
 #
 # Extra arguments are passed to forge, e.g. `npm run test:fork:strict -- --no-match-test 'test_Foo'`.
 # Foundry reads .env itself; this script sources it too so the chain-id check sees the same URL.
@@ -19,12 +24,23 @@ if [ -f .env ]; then
   set +a
 fi
 
+paths=(--match-path 'test/fork/*' --no-match-path 'test/fork/slow/*')
+if [ "${1:-}" = "--slow" ]; then
+  paths=(--match-path 'test/fork/slow/*')
+  shift
+fi
+
 if [ -z "${BASE_RPC_URL:-}" ]; then
   echo "BASE_RPC_URL is not set (put a private Base RPC URL in .env)." >&2
   exit 1
 fi
 
-chain_id="$(cast chain-id --rpc-url "$BASE_RPC_URL")"
+redact() { perl -pe 's/\Q$ENV{BASE_RPC_URL}\E/<BASE_RPC_URL>/g'; }
+
+if ! chain_id="$(cast chain-id --rpc-url "$BASE_RPC_URL" 2>&1)"; then
+  echo "The RPC did not answer the chain-id check, so no test ran: $(redact <<<"$chain_id")" >&2
+  exit 3
+fi
 if [ "$chain_id" != "8453" ]; then
   echo "BASE_RPC_URL answered chain id '$chain_id', expected 8453 (Base)." >&2
   exit 1
@@ -34,12 +50,29 @@ output_file="$(mktemp)"
 trap 'rm -f "$output_file"' EXIT
 
 set +e
-forge test --match-path 'test/fork/*' "$@" 2>&1 | tee "$output_file"
+forge test "${paths[@]}" "$@" 2>&1 | redact | tee "$output_file"
 forge_status=${PIPESTATUS[0]}
 set -e
 
 if [ "$forge_status" -ne 0 ]; then
+  # Forge prints each failing test as "[FAIL: <reason>] <name> (gas: N)". Only the reason is matched,
+  # so a test name or gas figure cannot look like an RPC error.
+  failures="$(grep -E '^\[FAIL' "$output_file" | sort -u | sed -E 's/\][^]]*$//' || true)"
+  rpc_pattern='HTTP error 429|status code 429|too many requests|rate.?limit|compute units|operation timed out|database error|error sending request|connection (reset|refused|closed)'
+  total="$(grep -c . <<<"$failures" || true)"
+  rpc="$(grep -Eic "$rpc_pattern" <<<"$failures" || true)"
+
+  if [ "$total" -gt 0 ] && [ "$rpc" -eq "$total" ]; then
+    message="Fork tests failed because the RPC throttled or timed out ($rpc failing), not because of the code. Re-run, or raise FOUNDRY_ETH_RPC_TIMEOUT."
+    [ "${GITHUB_ACTIONS:-}" = "true" ] && echo "::error title=RPC throttled::$message"
+    echo "$message" >&2
+    exit 3
+  fi
+
   echo "Fork tests failed (forge exit $forge_status)." >&2
+  if [ "$rpc" -gt 0 ]; then
+    echo "$rpc of the $total failures were RPC errors; the rest are real test failures." >&2
+  fi
   exit "$forge_status"
 fi
 

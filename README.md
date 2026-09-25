@@ -181,7 +181,7 @@ Both pair orderings are exercised throughout, because which one a launch gets is
   launch token.
 - `test/fork/FeeFlow.fork.t.sol` runs the full path against live Hydrex — real swaps, a real split, a real
   conversion, and each of the three fee uses — in both orientations.
-- `test/fork/LaunchCurve.fork.t.sol` launches against **every** quote the generator emits and checks each
+- `test/fork/slow/LaunchCurveAllQuotes.fork.t.sol` launches against **every** quote the generator emits and checks each
   opens at the target valuation, whichever side it lands on.
 
 ## Live addresses (Base)
