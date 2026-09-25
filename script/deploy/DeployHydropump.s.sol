@@ -20,8 +20,10 @@ import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.s
 /// @title DeployHydropump
 /// @dev Two identities, nothing else to configure:
 ///        deployer  (DEPLOYER_KEY)        owns the directory and launcher
-///        admin     (HYDROPUMP_ADMIN)     the Safe — upgrades, and owns the locker, registry, buyback
-///                                        and distributor
+///        admin     (HYDROPUMP_ADMIN)     upgrades: launcher and directory admin, locker and registry
+///                                        owner (their owner is also their upgrade authority)
+///        owner     (HYDROPUMP_OWNER)     owns the buyback and distributor, which cannot be upgraded;
+///                                        defaults to the admin
 ///        operator  (HYDROPUMP_OPERATOR)  the backend key that runs the jobs; defaults to the deployer
 ///
 ///      Order is forced by the references. The registry needs the launcher, the launcher needs the locker
@@ -42,16 +44,18 @@ contract DeployHydropump is Script {
         address admin = vm.envAddress("HYDROPUMP_ADMIN");
         address gaugeBribe = vm.envOr("HYDROPUMP_GAUGE_BRIBE", HydropumpAddresses.GAUGE_BRIBE);
         address operator = vm.envOr("HYDROPUMP_OPERATOR", deployer);
+        address owner = vm.envOr("HYDROPUMP_OWNER", admin);
 
         console2.log("=== Hydropump Deployment ===");
         console2.log("Deployer:", deployer);
         console2.log("Operator:", operator);
-        console2.log("Admin (Safe):", admin);
+        console2.log("Admin (upgrades):", admin);
+        console2.log("Owner (buyback, distributor):", owner);
 
         vm.startBroadcast(deployerKey);
 
         // --- the pieces that reference nothing ---
-        HydropumpBuyback buyback = new HydropumpBuyback(admin, operator, HydropumpAddresses.HYDX, gaugeBribe);
+        HydropumpBuyback buyback = new HydropumpBuyback(owner, operator, HydropumpAddresses.HYDX, gaugeBribe);
 
         PairDirectory directory = PairDirectory(
             address(
@@ -107,9 +111,9 @@ contract DeployHydropump is Script {
         registry.registerFeeUse(FeeUses.BUYBACK_BURN, address(buybackBurn));
         registry.setDefaultFeeUse(FeeUses.CREATOR_BALANCE);
 
-        // Emissions: the operator credits, the admin can rewrite and withdraw. Nothing references it, so
+        // Emissions: the operator credits, the owner can rewrite and withdraw. Nothing references it, so
         // it is wired to no one — the operator funds it out of band.
-        HydropumpRewardDistributor distributor = new HydropumpRewardDistributor(admin, operator);
+        HydropumpRewardDistributor distributor = new HydropumpRewardDistributor(owner, operator);
 
         // --- wire the back-references, then hand over ---
         locker.setLauncher(address(launcher));
@@ -125,6 +129,7 @@ contract DeployHydropump is Script {
 
         require(launcher.admin() == admin, "launcher admin handover failed");
         require(directory.admin() == admin, "directory admin handover failed");
+        require(buyback.owner() == owner && distributor.owner() == owner, "owner handover failed");
 
         vm.stopBroadcast();
 
