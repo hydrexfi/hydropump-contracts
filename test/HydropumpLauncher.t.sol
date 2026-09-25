@@ -49,15 +49,16 @@ contract HydropumpLauncherTest is HydropumpFixture {
         }
     }
 
-    /// Net buying to reach a valuation stays near 5% of it, from $100k to $100m on a $5k open.
+    /// Net buying to reach a valuation stays near 5% of it (3.5–6.5%) from $100k to $100m on a $5k open.
+    /// Samples the milestones and the top edge of each priced band, where the ratio dips lowest.
     function test_CurveCostsAboutFivePercentOfTheValuationReached() public view {
-        int24[5] memory ticks = [int24(29_958), 39_122, 52_985, 76_012, 99_039];
-        uint256[5] memory multiples = [uint256(20), 50, 200, 2_000, 20_000];
+        int24[8] memory ticks = [int24(29_958), 33_999, 39_122, 52_985, 62_999, 76_012, 92_999, 99_039];
 
         for (uint256 m = 0; m < ticks.length; m++) {
-            uint256 costE18 = _costInOpeningValuations(ticks[m]);
-            uint256 ratioBps = costE18 * 10_000 / (multiples[m] * 1e18);
-            assertGe(ratioBps, 400, "valuation reached too cheaply");
+            uint256 s = _sqrtE18(ticks[m]);
+            uint256 valuationE18 = Math.mulDiv(s, s, 1e18); // multiple of the opening valuation
+            uint256 ratioBps = Math.mulDiv(_costInOpeningValuations(ticks[m]), 10_000, valuationE18);
+            assertGe(ratioBps, 350, "valuation reached too cheaply");
             assertLe(ratioBps, 650, "valuation reached too dearly");
         }
     }

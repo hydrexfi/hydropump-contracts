@@ -52,10 +52,11 @@ contracts/
 
 - **Supply** 10,000,000,000, all of it deployed as liquidity. Nothing is held back.
 - **Bands** five, at tick offsets `0 / 34k / 63k / 93k / 177k / 887.2k` from the start tick, holding
-  `20 / 14.5 / 15.5 / 19 / 31%` of supply. Net buying to reach a valuation is about 5% of it from $100k to
-  $100m: $1m takes about $50k and sells a third of supply. Offsets, not absolute ticks, so the curve is
-  quote-agnostic, and unsigned distances rather than directions — see **Pair ordering**. Bands are aligned to the pool's actual
-  tick spacing at launch time, and band 0 is always the one adjacent to the opening price.
+  `20 / 14.5 / 15.5 / 19 / 31%` of supply. Net buying to reach a valuation is about 5% of it (3.5–6.5%)
+  from $100k to $100m: $1m takes about $50k and sells a third of supply. Offsets, not absolute ticks, so
+  the curve is quote-agnostic, and unsigned distances rather than directions — see **Pair ordering**.
+  Bands are aligned to the pool's actual tick spacing at launch time, and band 0 is always the one
+  adjacent to the opening price.
 - **Start tick** per quote token, in the **directory**, refreshed as the quote's USD price moves. No oracle.
   `node script/quotes/build-quote-tokens.mjs` derives ticks for every eligible asset from the live Hydrex list.
   One number per quote covers both orientations: it is the token0-side reading, and the launcher negates it
