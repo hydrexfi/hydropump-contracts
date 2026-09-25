@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "test:unit": "forge test --no-match-path 'test/fork/*'",
-    "test:fork": "forge test --match-path 'test/fork/*' -vv",
+    "test:fork": "forge test --match-path 'test/fork/*' --no-match-path 'test/fork/slow/*' -vv",
     "test:fork:strict": "bash ./scripts/forkTestStrict.sh",
     "test:fork:slow": "bash ./scripts/forkTestStrict.sh --slow",
     "fmt:check": "forge fmt --check",

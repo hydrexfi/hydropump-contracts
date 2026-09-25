@@ -7,7 +7,7 @@ name: CI
 #   fork      — every suite under test/fork/ except test/fork/slow/, against Base via the
 #               BASE_RPC_URL secret. PRs from forks cannot read the secret, so their fork job fails.
 #
-# The slow fork suites (test/fork/slow/, about 15 minutes) run by hand from fork-slow.yml.
+# The slow fork suites (test/fork/slow/, about 14 minutes) run by hand from fork-slow.yml.
 #
 # The Foundry toolchain is pinned (see foundry-version-check.yml for why). Every `version:`
 # input below must stay identical; the version check asserts it.
@@ -66,6 +66,10 @@ jobs:
     name: fork tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # One run per branch at a time, so pushes do not pile parallel load onto the one RPC key.
+    concurrency:
+      group: fork-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v7
         with:

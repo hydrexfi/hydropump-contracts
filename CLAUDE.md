@@ -16,7 +16,7 @@ Findings labelled `HP-01` … `HP-23` refer to the internal security review of 2
 | Build and size check | `forge build --sizes` |
 | Unit tests | `npm run test:unit` |
 | Fork tests | `npm run test:fork:strict` — needs `BASE_RPC_URL`; fails if the RPC is not Base or any test skips (see below) |
-| Slow fork tests | `npm run test:fork:slow` — `test/fork/slow/` only, about 15 minutes; set `FOUNDRY_ETH_RPC_TIMEOUT=300` |
+| Slow fork tests | `npm run test:fork:slow` — `test/fork/slow/` only, about 14 minutes; set `FOUNDRY_ETH_RPC_TIMEOUT=300` |
 | Format check | `npm run fmt:check` (fix with `forge fmt`) |
 | Storage layouts | `npm run check:storage-snapshots` |
 

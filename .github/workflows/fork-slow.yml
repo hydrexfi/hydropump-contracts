@@ -1,7 +1,7 @@
 name: slow fork tests
 
 # The fork suites under test/fork/slow/, too long for every PR: they launch against every generated
-# quote token and take about 15 minutes. Run this by hand from the Actions tab, on any branch, after
+# quote token and take about 14 minutes. Run this by hand from the Actions tab, on any branch, after
 # changing the quote list, the launch curve or the launcher. CI (ci.yml) runs the other fork suites.
 
 on:
