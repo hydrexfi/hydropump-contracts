@@ -124,6 +124,7 @@ contract LaunchTaxForkTest is ForkFixture {
 
     /// A bot that buys and dumps at once. The tax is taken in tokens, which the bot then sells at the
     /// post-buy price, so a larger buy loses less than the tax; in the launch block it still loses ~all.
+    /// The deep first band lets a 1 ETH snipe keep a little more (~95.8% lost), accepted with the 5% curve.
     function test_ALaunchBlockSnipeLosesNearlyEverything() public onlyForked {
         (address token,,) = _launchWithBuy(true, 0);
         uint256 launchBlock = vm.getBlockNumber();
@@ -139,7 +140,7 @@ contract LaunchTaxForkTest is ForkFixture {
                 uint256 lossBps = (spends[j] - back) * 10_000 / spends[j];
                 console2.log("spend %e  block +%s  round-trip loss bps %s", spends[j], k, lossBps);
 
-                if (k == 0) assertGe(lossBps, 9_700, "a launch-block snipe must lose at least 97%");
+                if (k == 0) assertGe(lossBps, 9_500, "a launch-block snipe must lose at least 95%");
                 vm.revertToState(snap);
             }
         }

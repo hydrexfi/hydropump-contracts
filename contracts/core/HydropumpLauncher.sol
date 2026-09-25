@@ -137,25 +137,20 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     }
 
     /// @notice Band `i` as unsigned tick distances from the start tick, plus its share of supply in bps.
-    /// @dev The four priced bands hold 0.6074 of what they used to, which scales the quote needed to
-    ///      reach any price by the same factor — cost is the integral of the curve below it, and that is
-    ///      linear in the tokens each band holds. A launch reaches $1m of valuation on about $70k of net
-    ///      buying rather than $115k, having sold a third of its supply rather than half.
-    ///
-    ///      What those bands give up goes to the tail, which is why the tail now starts at 150k rather
-    ///      than 92k: parked against the old boundary it made everything past ~$50m roughly twenty times
-    ///      harder, a wall rather than a book. Spread to 150k it is about 1.5x, and pushing the boundary
-    ///      further buys almost nothing.
+    /// @dev Invariant: net buying to reach a valuation is about 5% of it (4–6.5%) from 20x to 20,000x the
+    ///      open, i.e. $100k to $100m on a $5k open; $1m takes about $50k and sells a third of supply.
+    ///      Band 0 is deep so the first buys do not run the price, and the tail starts at 177k so the
+    ///      book past $100m stays a book rather than a wall.
     /// @dev Offsets, never absolute ticks: a tick encodes a raw wei ratio and shifts with the quote token's
     ///      decimals and price. Unsigned, never signed: the direction they run in is not a property of the
     ///      curve but of which side of the pair the launch token landed on, and `_mintBands` applies it.
     ///      Band 0 is always the one adjacent to the start price. Shares sum to 10000.
     function band(uint256 i) public pure returns (int24 offsetLower, int24 offsetUpper, uint256 shareBps) {
-        if (i == 0) return (0, 14_000, 547);
-        if (i == 1) return (14_000, 36_000, 1_336);
-        if (i == 2) return (36_000, 62_000, 1_822);
-        if (i == 3) return (62_000, 150_000, 2_247);
-        return (150_000, 887_200, 4_048);
+        if (i == 0) return (0, 34_000, 2_000);
+        if (i == 1) return (34_000, 63_000, 1_450);
+        if (i == 2) return (63_000, 93_000, 1_550);
+        if (i == 3) return (93_000, 177_000, 1_900);
+        return (177_000, 887_200, 3_100);
     }
 
     /*//////////////////////////////////////////////////////////////
