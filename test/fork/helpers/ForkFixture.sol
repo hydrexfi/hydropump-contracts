@@ -253,8 +253,7 @@ abstract contract ForkFixture is Test {
         _ageTwapWindow(token, quoteToken);
     }
 
-    /// @dev Gives the pool a price history longer than `SwapPriceLimit.AVERAGE_WINDOW`, which the fee
-    ///      swaps need before they will trade.
+    /// @dev Gives the pool a price history longer than `SwapPriceLimit.AVERAGE_WINDOW`.
     function _ageTwapWindow(address token, address quoteToken) internal {
         vm.warp(vm.getBlockTimestamp() + 1_200);
         vm.roll(vm.getBlockNumber() + 600);

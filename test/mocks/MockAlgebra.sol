@@ -78,8 +78,7 @@ contract MockAlgebraPool {
         }
     }
 
-    /// @dev Integrates the price history as Algebra's oracle does, and reverts like it for a window older
-    ///      than the pool.
+    /// @dev Integrates the price history, reverting like Algebra for a window older than the pool.
     function getTimepoints(uint32[] memory secondsAgos)
         external
         view

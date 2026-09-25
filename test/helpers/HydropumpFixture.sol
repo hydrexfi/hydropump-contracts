@@ -162,7 +162,7 @@ abstract contract HydropumpFixture is Test {
                 feeUse: feeUse
             })
         );
-        // A pool with fees to swap has a price history, so fee swaps have an average to check against.
+        // Give the pool a price history, as any pool with fees to swap has.
         vm.warp(vm.getBlockTimestamp() + SwapPriceLimit.AVERAGE_WINDOW);
     }
 

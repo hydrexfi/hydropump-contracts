@@ -12,8 +12,7 @@ import {IAlgebraPool} from "../../contracts/interfaces/IAlgebraPool.sol";
 import {ForkFixture} from "./helpers/ForkFixture.sol";
 
 /// @notice `SwapPriceLimit` against live Hydrex: the real plugin, the real router's partial fill, and a
-///         push on both fee swaps, within a block and held across one. Launch token as token0; the mirrored
-///         suite runs token1.
+///         push on both fee swaps. Launch token as token0; the mirrored suite runs token1.
 contract SwapPriceLimitForkTest is ForkFixture {
     using stdStorage for StdStorage;
 
@@ -21,8 +20,7 @@ contract SwapPriceLimitForkTest is ForkFixture {
         return true;
     }
 
-    /// @dev Real fees split, `bob` holding launch tokens to push with, and the price settled for the
-    ///      averaging window so the block open and the average agree.
+    /// @dev Real fees split, `bob` holding launch tokens to push with, and the price settled for the window.
     function _tradedLaunch(bytes32 feeUse) internal returns (address token, address pool) {
         (token, pool,,) = _launchOnSide(WETH, _wantToken0(), feeUse);
         _passLaunchWindow();
@@ -132,7 +130,6 @@ contract SwapPriceLimitForkTest is ForkFixture {
         assertEq(_sqrtPrice(pool), pushed, "and the pool was not touched");
     }
 
-    /// A push held into the next block becomes that block's open, but not the two-minute average.
     function test_ConversionSellsNothingIntoAPushHeldAcrossABlock() public onlyForked {
         (address token, address pool) = _tradedLaunch(FeeUses.CREATOR_BALANCE);
         uint256 owed = locker.protocolOwed(token);
@@ -153,8 +150,7 @@ contract SwapPriceLimitForkTest is ForkFixture {
         assertEq(locker.protocolOwed(token), owed, "the share stays booked");
     }
 
-    /// The live plugin refuses an average older than the pool, so a new launch's buyback uses the block
-    /// open alone and does not wait.
+    /// The live plugin refuses an average older than the pool, so the buyback uses the open alone.
     function test_AYoungPoolsBuybackFallsBackToTheBlockOpen() public onlyForked {
         (address token, address pool,,) = _launchOnSide(WETH, _wantToken0(), FeeUses.BUYBACK_BURN);
         _passLaunchWindow();
@@ -174,8 +170,6 @@ contract SwapPriceLimitForkTest is ForkFixture {
         assertLt(locker.creatorOwed(token, WETH), owedQuote, "the buyback went ahead");
     }
 
-    /// Sold deep for one block, then bought most of the way back: the open and the average are far apart,
-    /// so nothing sells.
     function test_ConversionSkipsAfterTheAverageWasDragged() public onlyForked {
         (address token, address pool) = _tradedLaunch(FeeUses.CREATOR_BALANCE);
         uint256 owed = locker.protocolOwed(token);

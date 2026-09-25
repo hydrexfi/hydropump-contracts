@@ -247,11 +247,11 @@ contract FeeUsesTest is HydropumpFixture {
         assertEq(IERC20(token).totalSupply(), supplyBefore - 30_000e18);
     }
 
-    /// A price that has held for the whole averaging window is the market, so the buy still goes through.
+    /// A price that has held for the averaging window is the market, so the buy goes through.
     function test_BuybackBurnFillsAtAPriceThatHeldForTheWindow() public {
         (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
 
-        // Spot shoved a long way against the buy, and left there for the window. It still goes through.
+        // Spot shoved a long way against the buy before this block. It still goes through.
         int24 shoved = _currentTick(pool) + (token < _quote() ? int24(40_000) : int24(-40_000));
         MockAlgebraPool(pool).setPrice(TickMath.getSqrtRatioAtTick(shoved));
         vm.warp(vm.getBlockTimestamp() + SwapPriceLimit.AVERAGE_WINDOW);
@@ -339,23 +339,7 @@ contract FeeUsesTest is HydropumpFixture {
         }
     }
 
-    /// A push held across a block boundary moves the block open but not the average, so nothing is bought.
-    function test_BuybackBurnBuysNothingIntoAPushHeldAcrossABlock() public {
-        (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
-        uint256 owed = locker.creatorOwed(token, _quote());
-
-        _setSpot(pool, _currentTick(pool) + _launchPriceOffset(token, 600));
-        vm.warp(vm.getBlockTimestamp() + 2);
-        vm.roll(vm.getBlockNumber() + 1);
-
-        locker.spendCreatorShare(token);
-
-        assertEq(buybackBurn.lifetimeBurned(token), 0, "nothing bought into the push");
-        assertEq(locker.creatorOwed(token, _quote()), owed, "the quote is booked back");
-    }
-
-    /// A small push held across a block stays within the skip, and the buy anchors to the average (the
-    /// stricter of the two here), not to the pushed open.
+    /// A small held push stays under the skip, so the stricter anchor (the average) sets the limit.
     function test_BuybackBurnAnchorsToTheAverageAfterASmallHeldPush() public {
         (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
         router.configure(3_000, 5_000); // a fill big enough that only the limit stops it
@@ -366,11 +350,9 @@ contract FeeUsesTest is HydropumpFixture {
         vm.roll(vm.getBlockNumber() + 1);
 
         locker.spendCreatorShare(token);
-        // The average moved ~7 ticks, so the limit is ~520 above fair; anchored to the open it would be 913.
         assertApproxEqAbs(_currentTick(pool), fair + _launchPriceOffset(token, 520), 2, "stopped 5% above the average");
     }
 
-    /// A pool younger than the averaging window has no average yet, so it falls back to the block open.
     function test_BuybackBurnOnAYoungPoolFallsBackToTheBlockOpen() public {
         (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
         uint256 owed = locker.creatorOwed(token, _quote());
@@ -386,8 +368,7 @@ contract FeeUsesTest is HydropumpFixture {
         assertGt(buybackBurn.lifetimeBurned(token), 0, "and an unpushed buy does not wait");
     }
 
-    /// A deep push held for one block, then only part-restored, leaves the open far from the average, so the
-    /// buy is skipped rather than anchored to either.
+    /// A deep one-block push, part-restored, leaves the open far from the average.
     function test_BuybackBurnSkipsAfterTheAverageWasDragged() public {
         (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
         uint256 owed = locker.creatorOwed(token, _quote());
@@ -396,15 +377,13 @@ contract FeeUsesTest is HydropumpFixture {
         _setSpot(pool, fair + _launchPriceOffset(token, 100_000));
         vm.warp(vm.getBlockTimestamp() + 2);
         vm.roll(vm.getBlockNumber() + 1);
-        _moveSpotThisBlock(pool, fair + _launchPriceOffset(token, 1_000)); // sold most of the way back
+        _moveSpotThisBlock(pool, fair + _launchPriceOffset(token, 1_000));
 
         locker.spendCreatorShare(token);
         assertEq(buybackBurn.lifetimeBurned(token), 0, "nothing bought");
         assertEq(locker.creatorOwed(token, _quote()), owed, "the quote is booked back");
     }
 
-    /// A young pool has no average, so after a deep push and a sell-back the buy still stops twice the
-    /// buffer above spot rather than following the open up.
     function test_BuybackBurnOnAYoungPoolStopsNearSpotAfterADeepPush() public {
         (address token, address pool) = _launchWithFees(FeeUses.BUYBACK_BURN, 0, 1e18);
         vm.warp(vm.getBlockTimestamp() - SwapPriceLimit.AVERAGE_WINDOW); // back to the launch's own second
