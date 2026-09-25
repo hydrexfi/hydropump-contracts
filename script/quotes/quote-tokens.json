@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-24T21:43:09.179Z",
+  "generatedAt": "2026-09-25T18:26:00.163Z",
   "source": "https://api.hydrex.fi/assets",
   "listSource": "https://api.hydrex.fi/assets",
   "launchSupply": 10000000000,
@@ -161,79 +161,79 @@
     true
   ],
   "startTicks": [
-    -488805,
-    -224055,
-    -225054,
-    -224071,
-    -226250,
-    -407504,
-    -351911,
-    -225377,
-    -190489,
-    -418139,
-    -114115,
-    -425709,
-    -448839,
-    -433538,
-    -430542,
-    -433727,
-    -441898,
-    -437466,
-    -426178,
-    -429490,
-    -450085,
-    -425330,
-    -434718,
-    -141481,
-    -123537,
-    -67296,
-    -93232,
-    -59079,
-    -111711,
-    -119711,
-    -49182,
-    -76734,
-    -156239,
-    -133712,
-    -102390,
-    -130793,
-    -142157,
-    -179563,
-    -384627,
-    -165158,
-    -202299,
+    -488754,
+    -224025,
+    -225092,
+    -224091,
+    -226290,
+    -407809,
+    -352110,
+    -225400,
+    -190302,
+    -417943,
+    -114338,
+    -425969,
+    -448775,
+    -433658,
+    -430577,
+    -433779,
+    -441588,
+    -437843,
+    -426061,
+    -429517,
+    -450225,
+    -425371,
+    -434614,
+    -143556,
+    -124089,
+    -67266,
+    -93491,
+    -59741,
+    -111785,
+    -120123,
+    -49468,
+    -76575,
+    -156167,
+    -133784,
+    -102148,
+    -132280,
+    -142541,
+    -179269,
+    -385803,
+    -165416,
+    -202265,
     -214461,
-    -200279,
-    -192180,
-    -178398,
-    -200755,
-    -198041,
-    -190368,
-    -156095,
-    -186145,
-    -166000,
+    -200308,
+    -192128,
+    -178225,
+    -200766,
+    -197923,
+    -189936,
+    -155946,
+    -186283,
+    -165537,
     -210030,
-    -172706,
-    -188929,
-    -199812,
-    -195908,
-    -180899,
-    -199183,
-    -145768,
-    -172727,
+    -172777,
+    -188958,
+    -199765,
+    -195777,
+    -180944,
+    -199271,
+    -145621,
+    -172887,
     -169075,
-    -202263,
-    -191316,
-    -189045,
-    -197322,
-    -195070,
-    -190121,
-    -181409,
-    -204435,
-    -206191,
+    -202347,
+    -191320,
+    -189053,
+    -197668,
+    -195068,
+    -190167,
+    -181388,
+    -204337,
+    -206243,
     -200090,
-    -163858,
-    -422707,
+    -163946,
+    -422721,
     -145093,
     -421417,
     -421416
@@ -395,82 +395,82 @@
     6
   ],
   "priceUsdE8": [
-    8441441231519,
-    268559307777,
-    296769676120,
-    269000862790,
-    334484268879,
-    24872927,
-    9583005,
-    306512370078,
-    9362128219,
-    7204510590,
-    4514945,
-    153578480,
-    155165561694,
-    33597763630,
-    24901300611,
-    34241195323,
-    77513164188,
-    49763547547,
-    16095402006,
-    22414028325,
-    175750705865,
-    14787120734,
-    37807986864,
-    69676905,
-    11582695,
-    41823,
-    559424,
-    18390,
-    3550080,
-    7900501,
-    6836,
-    107473,
-    3047916,
-    32041793,
-    1397810,
-    23929441,
-    74547021,
-    3139797042,
-    2525000,
-    743559409,
-    30496000000,
+    8398360255538,
+    267770437380,
+    297896575991,
+    269540426773,
+    335819451848,
+    25644567,
+    9775036,
+    307233869278,
+    9188369261,
+    7064227663,
+    4616704,
+    157616602,
+    154173927680,
+    34005872333,
+    24987199745,
+    34418349273,
+    75147069033,
+    51675229480,
+    15907806345,
+    22475452585,
+    178240746713,
+    14846900600,
+    37415838591,
+    85740259,
+    12239968,
+    41698,
+    574130,
+    19648,
+    3576482,
+    8232861,
+    7034,
+    105778,
+    3025865,
+    32271238,
+    1364414,
+    27764727,
+    77463924,
+    3048649969,
+    2840000,
+    762999628,
+    30391730254,
     102895043454,
-    24919000000,
-    11087000000,
-    2794500000,
-    26132000000,
-    19921734929,
-    9249500000,
-    300410171,
-    6063617878,
-    808841711,
+    24989500000,
+    11029000000,
+    2746500000,
+    26161794320,
+    19688188075,
+    8858500000,
+    295981361,
+    6147807253,
+    772232137,
     66067000000,
-    1581594642,
-    8009648936,
-    23781048212,
-    16095772827,
-    3588541197,
-    22331632192,
-    106970134,
-    1585000000,
+    1592826385,
+    8033252207,
+    23669674028,
+    15886014039,
+    3604697641,
+    22528535064,
+    105408341,
+    1610500000,
     1100068000,
-    30386327706,
-    10169264092,
-    8103400000,
-    18539755885,
-    14800977477,
-    9023694992,
-    3776091236,
-    37759000000,
-    45003536423,
+    30642631320,
+    10172959316,
+    8109458170,
+    19192526767,
+    14799318503,
+    9065003674,
+    3768393894,
+    37389500000,
+    45241653223,
     24451754837,
-    652916066,
-    113748461,
-    99991672,
-    99984778,
-    99978111
+    658650492,
+    113909512,
+    99986226,
+    99990671,
+    99978018
   ],
   "tokens": [
     {
@@ -478,369 +478,369 @@
       "address": "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
       "decimals": 8,
       "category": "bluechip",
-      "priceUsd": 84414.41231519252,
-      "startTick": -488805,
-      "priceUsdE8": 8441441231519
+      "priceUsd": 83983.60255537828,
+      "startTick": -488754,
+      "priceUsdE8": 8398360255538
     },
     {
       "symbol": "superOETHb",
       "address": "0xdbfefd2e8460a6ee4955a68582f85708baea60a3",
       "decimals": 18,
       "category": "bluechip",
-      "priceUsd": 2685.5930777675862,
-      "startTick": -224055,
-      "priceUsdE8": 268559307777
+      "priceUsd": 2677.704373797574,
+      "startTick": -224025,
+      "priceUsdE8": 267770437380
     },
     {
       "symbol": "weETH",
       "address": "0x04c0599ae5a44757c0af6f9ec3b93da8976c150a",
       "decimals": 18,
       "category": "bluechip",
-      "priceUsd": 2967.6967612039507,
-      "startTick": -225054,
-      "priceUsdE8": 296769676120
+      "priceUsd": 2978.9657599079933,
+      "startTick": -225092,
+      "priceUsdE8": 297896575991
     },
     {
       "symbol": "WETH",
       "address": "0x4200000000000000000000000000000000000006",
       "decimals": 18,
       "category": "bluechip",
-      "priceUsd": 2690.008627901133,
-      "startTick": -224071,
-      "priceUsdE8": 269000862790
+      "priceUsd": 2695.404267728118,
+      "startTick": -224091,
+      "priceUsdE8": 269540426773
     },
     {
       "symbol": "wstETH",
       "address": "0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452",
       "decimals": 18,
       "category": "bluechip",
-      "priceUsd": 3344.842688788099,
-      "startTick": -226250,
-      "priceUsdE8": 334484268879
+      "priceUsd": 3358.1945184756983,
+      "startTick": -226290,
+      "priceUsdE8": 335819451848
     },
     {
       "symbol": "cbADA",
       "address": "0xcbada732173e39521cdbe8bf59a6dc85a9fc7b8c",
       "decimals": 6,
       "category": "coinbase_asset",
-      "priceUsd": 0.24872927434577727,
-      "startTick": -407504,
-      "priceUsdE8": 24872927
+      "priceUsd": 0.2564456714584007,
+      "startTick": -407809,
+      "priceUsdE8": 25644567
     },
     {
       "symbol": "cbDOGE",
       "address": "0xcbd06e5a2b0c65597161de254aa074e489deb510",
       "decimals": 8,
       "category": "coinbase_asset",
-      "priceUsd": 0.09583005248898804,
-      "startTick": -351911,
-      "priceUsdE8": 9583005
+      "priceUsd": 0.09775036280746953,
+      "startTick": -352110,
+      "priceUsdE8": 9775036
     },
     {
       "symbol": "cbETH",
       "address": "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22",
       "decimals": 18,
       "category": "coinbase_asset",
-      "priceUsd": 3065.123700780516,
-      "startTick": -225377,
-      "priceUsdE8": 306512370078
+      "priceUsd": 3072.338692784096,
+      "startTick": -225400,
+      "priceUsdE8": 307233869278
     },
     {
       "symbol": "cbHYPE",
       "address": "0xb200000000000000000000451d033a5000cb479e",
       "decimals": 18,
       "category": "coinbase_asset",
-      "priceUsd": 93.62128218564168,
-      "startTick": -190489,
-      "priceUsdE8": 9362128219
+      "priceUsd": 91.88369260849561,
+      "startTick": -190302,
+      "priceUsdE8": 9188369261
     },
     {
       "symbol": "cbLTC",
       "address": "0xcb17c9db87b595717c857a08468793f5bab6445f",
       "decimals": 8,
       "category": "coinbase_asset",
-      "priceUsd": 72.04510590302533,
-      "startTick": -418139,
-      "priceUsdE8": 7204510590
+      "priceUsd": 70.642276627173,
+      "startTick": -417943,
+      "priceUsdE8": 7064227663
     },
     {
       "symbol": "cbMEGA",
       "address": "0xcb111e6a2a3bde90856d299d61341ac302167d23",
       "decimals": 18,
       "category": "coinbase_asset",
-      "priceUsd": 0.045149447634054644,
-      "startTick": -114115,
-      "priceUsdE8": 4514945
+      "priceUsd": 0.04616704359021077,
+      "startTick": -114338,
+      "priceUsdE8": 4616704
     },
     {
       "symbol": "cbXRP",
       "address": "0xcb585250f852c6c6bf90434ab21a00f02833a4af",
       "decimals": 6,
       "category": "coinbase_asset",
-      "priceUsd": 1.5357848001601895,
-      "startTick": -425709,
-      "priceUsdE8": 153578480
+      "priceUsd": 1.5761660223057512,
+      "startTick": -425969,
+      "priceUsdE8": 157616602
     },
     {
       "symbol": "cbZEC",
       "address": "0xb2000000000000000000008501b13360000cb2ec",
       "decimals": 8,
       "category": "coinbase_asset",
-      "priceUsd": 1551.655616939445,
-      "startTick": -448839,
-      "priceUsdE8": 155165561694
+      "priceUsd": 1541.7392767973988,
+      "startTick": -448775,
+      "priceUsdE8": 154173927680
     },
     {
       "symbol": "AAPLc",
       "address": "0xb200000000000000000000c2e324d24d7eecd1fb",
       "decimals": 8,
       "category": "coinbase_stock",
-      "priceUsd": 335.9776363043005,
-      "startTick": -433538,
-      "priceUsdE8": 33597763630
+      "priceUsd": 340.0587233338654,
+      "startTick": -433658,
+      "priceUsdE8": 34005872333
     },
     {
       "symbol": "AMZNc",
       "address": "0xb200000000000000000000d9192b6b456483c2e8",
       "decimals": 8,
       "category": "coinbase_stock",
-      "priceUsd": 249.01300610859113,
-      "startTick": -430542,
-      "priceUsdE8": 24901300611
+      "priceUsd": 249.87199744992705,
+      "startTick": -430577,
+      "priceUsdE8": 24987199745
     },
     {
       "symbol": "GOOGLc",
       "address": "0xb2000000000000000000002d0ba3164cc74f58b7",
       "decimals": 8,
       "category": "coinbase_stock",
-      "priceUsd": 342.4119532338805,
-      "startTick": -433727,
-      "priceUsdE8": 34241195323
+      "priceUsd": 344.18349273156724,
+      "startTick": -433779,
+      "priceUsdE8": 34418349273
     },
     {
       "symbol": "METAc",
       "address": "0xb2000000000000000000008bc8786b856e61707c",
       "decimals": 8,
       "category": "coinbase_stock",
-      "priceUsd": 775.1316418778442,
-      "startTick": -441898,
-      "priceUsdE8": 77513164188
+      "priceUsd": 751.47069032633,
+      "startTick": -441588,
+      "priceUsdE8": 75147069033
     },
     {
       "symbol": "MSFTc",
       "address": "0xb200000000000000000000ab99cfa739e253872b",
       "decimals": 8,
       "category": "coinbase_stock",
-      "priceUsd": 497.6354754720998,
-      "startTick": -437466,
-      "priceUsdE8": 49763547547
+      "priceUsd": 516.7522947993081,
+      "startTick": -437843,
+      "priceUsdE8": 51675229480
     },
     {
       "symbol": "MSTRc",
       "address": "0xb2000000000000000000004884b426556b92883d",
       "decimals": 8,
       "category": "coinbase_stock",
-      "priceUsd": 160.95402005615287,
-      "startTick": -426178,
-      "priceUsdE8": 16095402006
+      "priceUsd": 159.07806345162757,
+      "startTick": -426061,
+      "priceUsdE8": 15907806345
     },
     {
       "symbol": "NVDAc",
       "address": "0xb20000000000000000000078ee7ce2fe4908108c",
       "decimals": 8,
       "category": "coinbase_stock",
-      "priceUsd": 224.14028325390277,
-      "startTick": -429490,
-      "priceUsdE8": 22414028325
+      "priceUsd": 224.75452585383385,
+      "startTick": -429517,
+      "priceUsdE8": 22475452585
     },
     {
       "symbol": "SNDKc",
       "address": "0xb200000000000000000000397293cb8cda9a10c5",
       "decimals": 8,
       "category": "coinbase_stock",
-      "priceUsd": 1757.5070586526513,
-      "startTick": -450085,
-      "priceUsdE8": 175750705865
+      "priceUsd": 1782.4074671289413,
+      "startTick": -450225,
+      "priceUsdE8": 178240746713
     },
     {
       "symbol": "SPCXc",
       "address": "0xb2000000000000000000007b9fcbd005511acbd5",
       "decimals": 8,
       "category": "coinbase_stock",
-      "priceUsd": 147.87120734179553,
-      "startTick": -425330,
-      "priceUsdE8": 14787120734
+      "priceUsd": 148.46900599868948,
+      "startTick": -425371,
+      "priceUsdE8": 14846900600
     },
     {
       "symbol": "TSLAc",
       "address": "0xb2000000000000000000001e800a7f5189430cd0",
       "decimals": 8,
       "category": "coinbase_stock",
-      "priceUsd": 378.07986864041237,
-      "startTick": -434718,
-      "priceUsdE8": 37807986864
+      "priceUsd": 374.15838590586225,
+      "startTick": -434614,
+      "priceUsdE8": 37415838591
     },
     {
       "symbol": "AERO",
       "address": "0x940181a94a35a4569e4529a3cdfb74e38fd98631",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.6967690496588961,
-      "startTick": -141481,
-      "priceUsdE8": 69676905
+      "priceUsd": 0.8574025900504152,
+      "startTick": -143556,
+      "priceUsdE8": 85740259
     },
     {
       "symbol": "AVNT",
       "address": "0x696f9436b67233384889472cd7cd58a6fb5df4f1",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.115826954354322,
-      "startTick": -123537,
-      "priceUsdE8": 11582695
+      "priceUsd": 0.12239967570239668,
+      "startTick": -124089,
+      "priceUsdE8": 12239968
     },
     {
       "symbol": "BNKR",
       "address": "0x22af33fe49fd1fa80c7149773dde5890d3c76f3b",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.0004182302711106868,
-      "startTick": -67296,
-      "priceUsdE8": 41823
+      "priceUsd": 0.00041697707142330484,
+      "startTick": -67266,
+      "priceUsdE8": 41698
     },
     {
       "symbol": "BRETT",
       "address": "0x532f27101965dd16442e59d40670faf5ebb142e4",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.005594242634496861,
-      "startTick": -93232,
-      "priceUsdE8": 559424
+      "priceUsd": 0.005741299902532593,
+      "startTick": -93491,
+      "priceUsdE8": 574130
     },
     {
       "symbol": "DRB",
       "address": "0x3ec2156d4c0a9cbdab4a016633b7bcf6a8d68ea2",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.00018389780582331856,
-      "startTick": -59079,
-      "priceUsdE8": 18390
+      "priceUsd": 0.00019647877343816357,
+      "startTick": -59741,
+      "priceUsdE8": 19648
     },
     {
       "symbol": "HYDX",
       "address": "0x00000e7efa313f4e11bfff432471ed9423ac6b30",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.0355008003265509,
-      "startTick": -111711,
-      "priceUsdE8": 3550080
+      "priceUsd": 0.0357648192402244,
+      "startTick": -111785,
+      "priceUsdE8": 3576482
     },
     {
       "symbol": "KTA",
       "address": "0xc0634090f2fe6c6d75e61be2b949464abb498973",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.07900501215711826,
-      "startTick": -119711,
-      "priceUsdE8": 7900501
+      "priceUsd": 0.08232860730687297,
+      "startTick": -120123,
+      "priceUsdE8": 8232861
     },
     {
       "symbol": "LFI",
       "address": "0x3722264ab15a1dfce5a5af89e6547f7949a8aba3",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.00006835516580868562,
-      "startTick": -49182,
-      "priceUsdE8": 6836
+      "priceUsd": 0.00007033775216839708,
+      "startTick": -49468,
+      "priceUsdE8": 7034
     },
     {
       "symbol": "MCADE",
       "address": "0xc48823ec67720a04a9dfd8c7d109b2c3d6622094",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.001074728410627419,
-      "startTick": -76734,
-      "priceUsdE8": 107473
+      "priceUsd": 0.0010577818677258864,
+      "startTick": -76575,
+      "priceUsdE8": 105778
     },
     {
       "symbol": "NOCK",
       "address": "0x9b5e262cf9bb04869ab40b19af91d2dc85761722",
       "decimals": 16,
       "category": "ecosystem",
-      "priceUsd": 0.030479160365519613,
-      "startTick": -156239,
-      "priceUsdE8": 3047916
+      "priceUsd": 0.030258645509882814,
+      "startTick": -156167,
+      "priceUsdE8": 3025865
     },
     {
       "symbol": "POD",
       "address": "0xed664536023d8e4b1640c394777d34abaff1df8f",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.32041792652900075,
-      "startTick": -133712,
-      "priceUsdE8": 32041793
+      "priceUsd": 0.3227123823548986,
+      "startTick": -133784,
+      "priceUsdE8": 32271238
     },
     {
       "symbol": "REPPO",
       "address": "0xff8104251e7761163fac3211ef5583fb3f8583d6",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.013978103762062596,
-      "startTick": -102390,
-      "priceUsdE8": 1397810
+      "priceUsd": 0.013644139988694735,
+      "startTick": -102148,
+      "priceUsdE8": 1364414
     },
     {
       "symbol": "TIBBIR",
       "address": "0xa4a2e2ca3fbfe21aed83471d28b6f65a233c6e00",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.23929440919433287,
-      "startTick": -130793,
-      "priceUsdE8": 23929441
+      "priceUsd": 0.2776472740051876,
+      "startTick": -132280,
+      "priceUsdE8": 27764727
     },
     {
       "symbol": "VIRTUAL",
       "address": "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 0.7454702133800619,
-      "startTick": -142157,
-      "priceUsdE8": 74547021
+      "priceUsd": 0.7746392391393162,
+      "startTick": -142541,
+      "priceUsdE8": 77463924
     },
     {
       "symbol": "VVV",
       "address": "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 31.39797041974163,
-      "startTick": -179563,
-      "priceUsdE8": 3139797042
+      "priceUsd": 30.486499688310577,
+      "startTick": -179269,
+      "priceUsdE8": 3048649969
     },
     {
       "symbol": "WMTX",
       "address": "0x3e31966d4f81c72d2a55310a6365a56a4393e98d",
       "decimals": 6,
       "category": "ecosystem",
-      "priceUsd": 0.02525,
-      "startTick": -384627,
-      "priceUsdE8": 2525000
+      "priceUsd": 0.0284,
+      "startTick": -385803,
+      "priceUsdE8": 2840000
     },
     {
       "symbol": "ZEN",
       "address": "0xf43eb8de897fbc7f2502483b2bef7bb9ea179229",
       "decimals": 18,
       "category": "ecosystem",
-      "priceUsd": 7.43559408644517,
-      "startTick": -165158,
-      "priceUsdE8": 743559409
+      "priceUsd": 7.629996282130538,
+      "startTick": -165416,
+      "priceUsdE8": 762999628
     },
     {
       "symbol": "wtAAPL",
       "address": "0x1020ec8aa3f709a1f3d8705cdba89b950451bd88",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 304.96,
-      "startTick": -202299,
-      "priceUsdE8": 30496000000
+      "priceUsd": 303.917302540458,
+      "startTick": -202265,
+      "priceUsdE8": 30391730254
     },
     {
       "symbol": "wtAMD",
@@ -856,81 +856,81 @@
       "address": "0x997bae3ec193a249596d3708c3fab7c501bb8a53",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 249.19,
-      "startTick": -200279,
-      "priceUsdE8": 24919000000
+      "priceUsd": 249.895,
+      "startTick": -200308,
+      "priceUsdE8": 24989500000
     },
     {
       "symbol": "wtBABA",
       "address": "0x7e5cc7eae0455a07ab4abf354e0f5657ba2888bd",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 110.87,
-      "startTick": -192180,
-      "priceUsdE8": 11087000000
+      "priceUsd": 110.29,
+      "startTick": -192128,
+      "priceUsdE8": 11029000000
     },
     {
       "symbol": "wtBMNR",
       "address": "0x2512ec661f0ba089c275ea105e31bad6fcfcf319",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 27.945,
-      "startTick": -178398,
-      "priceUsdE8": 2794500000
+      "priceUsd": 27.465,
+      "startTick": -178225,
+      "priceUsdE8": 2746500000
     },
     {
       "symbol": "wtCEG",
       "address": "0x3af952888cd89dad3e8af67cf4b7e740b36829c3",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 261.32,
-      "startTick": -200755,
-      "priceUsdE8": 26132000000
+      "priceUsd": 261.617943199569,
+      "startTick": -200766,
+      "priceUsdE8": 26161794320
     },
     {
       "symbol": "wtCOIN",
       "address": "0x5cda0e1ca4ce2af96315f7f8963c85399c172204",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 199.21734929208813,
-      "startTick": -198041,
-      "priceUsdE8": 19921734929
+      "priceUsd": 196.88188074609292,
+      "startTick": -197923,
+      "priceUsdE8": 19688188075
     },
     {
       "symbol": "wtCRCL",
       "address": "0x8afba81dec38de0a18e2df5e1967a7493651eebf",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 92.495,
-      "startTick": -190368,
-      "priceUsdE8": 9249500000
+      "priceUsd": 88.585,
+      "startTick": -189936,
+      "priceUsdE8": 8858500000
     },
     {
       "symbol": "wtDNUT",
       "address": "0x1db49ff8bee88ec73f82f395b0bead372bdcadb7",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 3.004101714331978,
-      "startTick": -156095,
-      "priceUsdE8": 300410171
+      "priceUsd": 2.959813609147123,
+      "startTick": -155946,
+      "priceUsdE8": 295981361
     },
     {
       "symbol": "wtDRAM",
       "address": "0x1a91df4a970ebab1bb4af32eb6d10509028ee4b8",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 60.63617877687588,
-      "startTick": -186145,
-      "priceUsdE8": 6063617878
+      "priceUsd": 61.478072528331396,
+      "startTick": -186283,
+      "priceUsdE8": 6147807253
     },
     {
       "symbol": "wtFGI",
       "address": "0x6aed8b1acfb04f4e0e6db580f12ff41438a394e5",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 8.088417107378378,
-      "startTick": -166000,
-      "priceUsdE8": 808841711
+      "priceUsd": 7.722321365235837,
+      "startTick": -165537,
+      "priceUsdE8": 772232137
     },
     {
       "symbol": "wtGOOGL",
@@ -946,72 +946,72 @@
       "address": "0x1197e6fa778c4d13e47875bd1761c68c22c928e0",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 15.815946420853235,
-      "startTick": -172706,
-      "priceUsdE8": 1581594642
+      "priceUsd": 15.928263848505479,
+      "startTick": -172777,
+      "priceUsdE8": 1592826385
     },
     {
       "symbol": "wtIAU",
       "address": "0x1e46d7efef64a833afb1cd49299a7ad5b439f4d8",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 80.09648935837703,
-      "startTick": -188929,
-      "priceUsdE8": 8009648936
+      "priceUsd": 80.33252206706828,
+      "startTick": -188958,
+      "priceUsdE8": 8033252207
     },
     {
       "symbol": "wtMCD",
       "address": "0x7ecae30ed8ee4f72653ada7b0941bde7a0a8ee8d",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 237.81048211987286,
-      "startTick": -199812,
-      "priceUsdE8": 23781048212
+      "priceUsd": 236.6967402823789,
+      "startTick": -199765,
+      "priceUsdE8": 23669674028
     },
     {
       "symbol": "wtMSTR",
       "address": "0xff05e1bd696900dc6a52ca35ca61bb1024eda8e2",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 160.95772827154315,
-      "startTick": -195908,
-      "priceUsdE8": 16095772827
+      "priceUsd": 158.86014038561987,
+      "startTick": -195777,
+      "priceUsdE8": 15886014039
     },
     {
       "symbol": "wtNKE",
       "address": "0x0883f32d23ed5535057a4b5e3eb1970fe08606af",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 35.88541197090017,
-      "startTick": -180899,
-      "priceUsdE8": 3588541197
+      "priceUsd": 36.04697641249892,
+      "startTick": -180944,
+      "priceUsdE8": 3604697641
     },
     {
       "symbol": "wtNVDA",
       "address": "0xfb5b41acdba20a3230f84be995173cfb98b8d6e7",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 223.3163219201631,
-      "startTick": -199183,
-      "priceUsdE8": 22331632192
+      "priceUsd": 225.28535063854662,
+      "startTick": -199271,
+      "priceUsdE8": 22528535064
     },
     {
       "symbol": "wtPLBY",
       "address": "0x35fde767dbfaa610d12cf99914bcd6cfeda73b7b",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 1.0697013356071745,
-      "startTick": -145768,
-      "priceUsdE8": 106970134
+      "priceUsd": 1.0540834142653397,
+      "startTick": -145621,
+      "priceUsdE8": 105408341
     },
     {
       "symbol": "wtPPLT",
       "address": "0x82f5baee1076334357a34a19e04f7c282d51ce47",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 15.85,
-      "startTick": -172727,
-      "priceUsdE8": 1585000000
+      "priceUsd": 16.105,
+      "startTick": -172887,
+      "priceUsdE8": 1610500000
     },
     {
       "symbol": "wtPTY",
@@ -1027,81 +1027,81 @@
       "address": "0x823ff7bbde2869aae73a6cd53e7f614442836757",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 303.86327706479136,
-      "startTick": -202263,
-      "priceUsdE8": 30386327706
+      "priceUsd": 306.4263131972511,
+      "startTick": -202347,
+      "priceUsdE8": 30642631320
     },
     {
       "symbol": "wtSGOV",
       "address": "0x78c31580c97101694c70022c83d570150c11e935",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 101.69264091744606,
-      "startTick": -191316,
-      "priceUsdE8": 10169264092
+      "priceUsd": 101.72959315533933,
+      "startTick": -191320,
+      "priceUsdE8": 10172959316
     },
     {
       "symbol": "wtSIVR",
       "address": "0xeb7f3e4093c9d68253b6104fbbff561f3ec0442f",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 81.034,
-      "startTick": -189045,
-      "priceUsdE8": 8103400000
+      "priceUsd": 81.0945816985988,
+      "startTick": -189053,
+      "priceUsdE8": 8109458170
     },
     {
       "symbol": "wtSKHY",
       "address": "0xfcd17ac4c4bf6a72c93018096f3fc09e66573ff9",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 185.39755885064608,
-      "startTick": -197322,
-      "priceUsdE8": 18539755885
+      "priceUsd": 191.92526766661388,
+      "startTick": -197668,
+      "priceUsdE8": 19192526767
     },
     {
       "symbol": "wtSPCX",
       "address": "0x19f89aaef8a93f38a974beca9776f09ab844887f",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 148.009774766991,
-      "startTick": -195070,
-      "priceUsdE8": 14800977477
+      "priceUsd": 147.99318503426986,
+      "startTick": -195068,
+      "priceUsdE8": 14799318503
     },
     {
       "symbol": "wtSPYM",
       "address": "0x31c2c14134e6e3b7ef9478297f199331133fc2d8",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 90.236949918733,
-      "startTick": -190121,
-      "priceUsdE8": 9023694992
+      "priceUsd": 90.65003673766799,
+      "startTick": -190167,
+      "priceUsdE8": 9065003674
     },
     {
       "symbol": "wtTR",
       "address": "0x433fd2fc0964b07e9820e4cd01774ede59d1f002",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 37.76091235968802,
-      "startTick": -181409,
-      "priceUsdE8": 3776091236
+      "priceUsd": 37.68393894123269,
+      "startTick": -181388,
+      "priceUsdE8": 3768393894
     },
     {
       "symbol": "wtTSLA",
       "address": "0x219a8d384a10bf19b9f24cb5cc53f79dd0e5a03d",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 377.59,
-      "startTick": -204435,
-      "priceUsdE8": 37759000000
+      "priceUsd": 373.895,
+      "startTick": -204337,
+      "priceUsdE8": 37389500000
     },
     {
       "symbol": "wtTSM",
       "address": "0x71c66449d2528e23514a9c197bfd55ae9db3b714",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 450.0353642328155,
-      "startTick": -206191,
-      "priceUsdE8": 45003536423
+      "priceUsd": 452.4165322297362,
+      "startTick": -206243,
+      "priceUsdE8": 45241653223
     },
     {
       "symbol": "wtTTWO",
@@ -1117,45 +1117,45 @@
       "address": "0x31fa821f8b1bdea7db357ec9622d1a2f6afe903d",
       "decimals": 18,
       "category": "st0x",
-      "priceUsd": 6.5291606645805205,
-      "startTick": -163858,
-      "priceUsdE8": 652916066
+      "priceUsd": 6.586504921738853,
+      "startTick": -163946,
+      "priceUsdE8": 658650492
     },
     {
       "symbol": "EURC",
       "address": "0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42",
       "decimals": 6,
       "category": "stablecoin",
-      "priceUsd": 1.1374846094310695,
-      "startTick": -422707,
-      "priceUsdE8": 113748461
+      "priceUsd": 1.1390951209358504,
+      "startTick": -422721,
+      "priceUsdE8": 113909512
     },
     {
       "symbol": "frxUSD",
       "address": "0xe5020a6d073a794b6e7f05678707de47986fb0b6",
       "decimals": 18,
       "category": "stablecoin",
-      "priceUsd": 0.9999167171165392,
+      "priceUsd": 0.9998622640825454,
       "startTick": -145093,
-      "priceUsdE8": 99991672
+      "priceUsdE8": 99986226
     },
     {
       "symbol": "USDC",
       "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "decimals": 6,
       "category": "stablecoin",
-      "priceUsd": 0.9998477787068747,
+      "priceUsd": 0.999906712954484,
       "startTick": -421417,
-      "priceUsdE8": 99984778
+      "priceUsdE8": 99990671
     },
     {
       "symbol": "USDT",
       "address": "0xfde4c96c8593536e31f229ea8f37b2ada2699bb2",
       "decimals": 6,
       "category": "stablecoin",
-      "priceUsd": 0.9997811103317085,
+      "priceUsd": 0.9997801751835478,
       "startTick": -421416,
-      "priceUsdE8": 99978111
+      "priceUsdE8": 99978018
     }
   ],
   "retired": {
