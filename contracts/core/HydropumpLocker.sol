@@ -12,6 +12,7 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {IHydropumpLocker} from "../interfaces/IHydropumpLocker.sol";
 import {IFeeUseRegistry} from "../interfaces/IFeeUseRegistry.sol";
 import {IFeeUse} from "../interfaces/IFeeUse.sol";
+import {IKeeperBuyback} from "../interfaces/IKeeperBuyback.sol";
 import {INonfungiblePositionManager} from "../interfaces/INonfungiblePositionManager.sol";
 import {ISwapRouter} from "../interfaces/ISwapRouter.sol";
 import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
@@ -169,6 +170,10 @@ contract HydropumpLocker is
         return _launches[token].creatorRecipient;
     }
 
+    function creatorOf(address token) external view returns (address) {
+        return _launches[token].creator;
+    }
+
     function quoteTokenOf(address token) external view returns (address) {
         return _launches[token].quoteToken;
     }
@@ -297,7 +302,7 @@ contract HydropumpLocker is
     }
 
     /// @notice Push the booked creator share to the launch's fee use, which spends it on arrival.
-    ///         Permissionless; the destination was fixed at launch.
+    ///         Permissionless for legacy strategies; keeper buybacks require `executeKeeperBuyback`.
     /// @dev Separate from the split so a fee use that reverts cannot stop fees being collected. If it
     ///      does revert, the share stays booked here until the registry is repointed.
     function spendCreatorShare(address token)
@@ -309,6 +314,25 @@ contract HydropumpLocker is
     }
 
     function _spendCreatorShare(address token) internal returns (uint256 launchTokenAmount, uint256 quoteAmount) {
+        return _spendCreatorShare(token, false, 0);
+    }
+
+    /// @notice Collect and execute a launch's configured keeper buyback.
+    /// @dev The fee use validates msg.sender's NFT ownership and voting power. No arbitrary payout recipient.
+    ///      Reverts atomically on ineligibility; unspent assets are rebooked by the normal accounting path.
+    function executeKeeperBuyback(address token, uint256 veTokenId)
+        external
+        nonReentrant
+        returns (uint256 launchTokenAmount, uint256 quoteAmount)
+    {
+        _splitRewards(token, fullMask(token));
+        return _spendCreatorShare(token, true, veTokenId);
+    }
+
+    function _spendCreatorShare(address token, bool keeperCall, uint256 veTokenId)
+        internal
+        returns (uint256 launchTokenAmount, uint256 quoteAmount)
+    {
         address registry = feeUseRegistry;
         if (registry == address(0)) revert RegistryUnset();
 
@@ -339,7 +363,11 @@ contract HydropumpLocker is
         uint256 heldLaunchToken = IERC20(token).balanceOf(address(this));
         uint256 heldQuote = IERC20(quoteToken).balanceOf(address(this));
 
-        IFeeUse(feeUse).onFees(token, assets, amounts);
+        if (keeperCall) {
+            IKeeperBuyback(feeUse).onFeesForKeeper(token, assets, amounts, msg.sender, veTokenId);
+        } else {
+            IFeeUse(feeUse).onFees(token, assets, amounts);
+        }
 
         // A fee use returns what it could not use — auto-LP does this on nearly every call, since a band
         // takes one ratio. Re-booking it keeps it payable instead of leaving it loose in this contract,
@@ -362,8 +390,8 @@ contract HydropumpLocker is
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Collect, then spend the creator's share on whatever the launch chose.
-    /// @dev Permissionless and unpointable: the destination was fixed at launch, so "claim", "buy back
-    ///      and burn" and "auto-LP" are all this call under three labels.
+    /// @dev The destination is fixed at launch. Keeper buybacks reject this legacy entry point;
+    ///      use `executeKeeperBuyback` for those launches.
     function handleCreatorRewards(address token)
         external
         nonReentrant
@@ -382,9 +410,9 @@ contract HydropumpLocker is
     }
 
     /// @notice Both sides in one transaction. What the frontend button calls.
-    /// @dev The protocol half is best-effort: it is the only part that touches the pool, and a pool that
-    ///      cannot fill a sell must not stop a creator being paid. On failure the share stays booked in
-    ///      `protocolOwed` for a later call.
+    /// @dev The protocol half is best-effort. On its failure the share stays booked in `protocolOwed`.
+    ///      A keeper buyback rejects this legacy entry point; execute it through `executeKeeperBuyback`
+    ///      and process the protocol share separately.
     ///
     ///      Send this with a generous gas limit. The `try` succeeds whether or not its body runs, so gas
     ///      estimation can settle on a limit that starves it — observed on mainnet.
