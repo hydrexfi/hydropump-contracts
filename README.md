@@ -190,17 +190,17 @@ Both pair orderings are exercised throughout, because which one a launch gets is
 
 | | |
 | --- | --- |
-| `PairDirectory` | `0xc06e27984c25B4C14D8e36091E633690206Da715` |
-| `HydropumpLauncher` | `0x0102B7c2C293CaA425994f0D8F930eccB216965d` |
-| `HydropumpLocker` | `0x1b5D6B9836E07aDCB5CBabA218E5EeE3fE2f21F5` |
-| `FeeUseRegistry` | `0xcd12D1E35f1957DB330492BbD8CAa1887500eD12` |
-| `CreatorBalanceFeeUse` | `0xfd2ef93dF03f536B1afD798a1ABAA8a5361e6A4e` |
-| `AutoLpFeeUse` | `0xe81d8f8415C8e1393bb0F5f059aF87C2bf523063` |
-| `BuybackBurnFeeUse` | `0x890c74027E6DC27A019d39329313ecc50064fd30` |
-| `HydropumpBuyback` | `0x104326575BCce86129933842D59BE172AD57b5e6` |
-| `HydropumpRewardDistributor` | `0x346bD6Ca0eBa1de331219B52C0903C03Ee86e0b9` |
+| `PairDirectory` | `0x22c104bf0cCc2258911FFA4DF7eC80f199ea0827` |
+| `HydropumpLauncher` | `0x1a7460cfc2B44EB2FfB9879612E726bF6bf52745` |
+| `HydropumpLocker` | `0x9c11834644C91A73AA959b01Bb7F1E148AF40D43` |
+| `FeeUseRegistry` | `0x183C76E489684Ad104d380D8487B3e37B918e7AA` |
+| `CreatorBalanceFeeUse` | `0xBe3bAD650F355CFad5aA22728B420764275CC054` |
+| `AutoLpFeeUse` | `0xa71A60E1F0A079825353797209Da86ac4113b2C0` |
+| `BuybackBurnFeeUse` | `0x339252034cC18F80D733Fb54683a2fbFFE265B9e` |
+| `HydropumpBuyback` | `0x356a1946cC92b8EC64d5c446fD6fbA550F8967f0` |
+| `HydropumpRewardDistributor` | `0x7f14E1850B81A51487120290d32472cB94cc2446` |
 
-Deployed at block `51748534`. Indexed by `hydrex-dummy/0.6.0`.
+Deployed at block `51785877`. Indexed by `hydrex-hydropump/1.0.0`.
 
 ## Deploy
 
@@ -210,23 +210,20 @@ Copy `.env.example` to `.env`, then:
 npm run deploy:base
 ```
 
-Two identities, nothing else to configure:
+Four identities:
 
-|                   | Role                                                                                                                                                                                                                                                              |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEPLOYER_KEY`    | Also the operator. Owns the launcher, so it registers quote tokens and refreshes start ticks, and it runs the buyback job.                                                                                                                                        |
-| `HYDROPUMP_ADMIN` | The Safe. Upgrade authority on the launcher, the only role that can repoint the locker, set and sweep the launch fee, or reassign itself, and owner of the locker and buyback — the fee split, the protocol fee recipient, and the gauge bribe all sit behind it. |
+| | Role |
+| --- | --- |
+| `DEPLOYER_KEY` | Signs the deploy and the first quote registration, then hands the directory to the operator. Keeps only the launcher's `owner`, which gates nothing. |
+| `HYDROPUMP_ADMIN` | Upgrade authority. Launcher and directory `admin`, locker and registry `owner` — on those two the owner is also the upgrade path, so it holds the fee split, the protocol fee recipient and the fee-use set too. |
+| `HYDROPUMP_OWNER` | Owns the buyback and reward distributor, neither of which can be upgraded: sweeps, operator, gauge bribe, allocations. Defaults to the admin. |
+| `HYDROPUMP_OPERATOR` | Backend key that runs the crons: buyback and distributor `operator`, and directory `owner` (reprices start ticks). |
 
-The split is deliberate: the hot key can do the daily work but cannot upgrade the launcher, repoint the
-locker, change the fee split, or move where protocol fees go. Repointing the locker would redirect every
-future launch's liquidity, so it sits with the Safe.
+The locker and registry go to the admin, and the directory to the operator, as `Ownable2Step` transfers:
+each has to call `acceptOwnership()` afterwards.
 
-The locker is deployed under the deployer so it can be wired to the launcher, then handed to the admin.
-That transfer is `Ownable2Step`, so accept it from the Safe afterwards.
-
-After the first quote registration, directory ownership goes to the backend key that runs the reprice cron
-(`0x1681b1d40AB2fb81F8a1dd28b56baFfbB869a214`, also `HYDROPUMP_OPERATOR`), which accepts it with
-`acceptOwnership()`.
+Live roles: admin `0x74266f2b206D1359B83fc74949EF07176FB3AE03`, owner
+`0x1aE3753d9b60743A89159CcFF8E251C60B560311`, operator `0x1681b1d40AB2fb81F8a1dd28b56baFfbB869a214`.
 
 ## Quote tokens
 
