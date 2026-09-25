@@ -21,25 +21,21 @@ contract SwapPriceLimitForkTest is ForkFixture {
         return true;
     }
 
-    /// @dev Real fees split, `bob` holding launch tokens to push with, and a fresh block.
+    /// @dev Real fees split, `bob` holding launch tokens to push with, and the price settled for the
+    ///      averaging window so the block open and the average agree.
     function _tradedLaunch(bytes32 feeUse) internal returns (address token, address pool) {
         (token, pool,,) = _launchOnSide(WETH, _wantToken0(), feeUse);
         _passLaunchWindow();
         _tradeBothWaysAndAge(token, WETH, 2 ether);
         _swapIn(bob, WETH, token, 1 ether);
         locker.splitRewards(token);
-        _nextBlock();
+        vm.warp(vm.getBlockTimestamp() + SwapPriceLimit.AVERAGE_WINDOW);
+        vm.roll(vm.getBlockNumber() + SwapPriceLimit.AVERAGE_WINDOW / 2);
     }
 
     function _nextBlock() internal {
         vm.warp(vm.getBlockTimestamp() + 2);
         vm.roll(vm.getBlockNumber() + 1);
-    }
-
-    /// @dev Bob's buy in `_tradedLaunch` moved the price; this lets it hold long enough to be the average too.
-    function _holdForTheWindow() internal {
-        vm.warp(vm.getBlockTimestamp() + SwapPriceLimit.AVERAGE_WINDOW);
-        vm.roll(vm.getBlockNumber() + SwapPriceLimit.AVERAGE_WINDOW / 2);
     }
 
     function _limit(address token, int24 open, bool launchPriceDown) internal pure returns (uint160) {
@@ -118,7 +114,6 @@ contract SwapPriceLimitForkTest is ForkFixture {
 
     function test_BuybackBuysNothingIntoASameBlockPush() public onlyForked {
         (address token, address pool) = _tradedLaunch(FeeUses.BUYBACK_BURN);
-        _holdForTheWindow();
         uint256 owedQuote = locker.creatorOwed(token, WETH);
         uint256 owedToken = locker.creatorOwed(token, token);
         assertGt(owedQuote, 0);
@@ -179,11 +174,10 @@ contract SwapPriceLimitForkTest is ForkFixture {
         assertLt(locker.creatorOwed(token, WETH), owedQuote, "the buyback went ahead");
     }
 
-    /// Sold deep for one block and bought back: the average is dragged far below spot, but the sale still
-    /// stops within twice the buffer of spot.
-    function test_ConversionStopsNearSpotAfterTheAverageWasDragged() public onlyForked {
+    /// Sold deep for one block, then bought most of the way back: the open and the average are far apart,
+    /// so nothing sells.
+    function test_ConversionSkipsAfterTheAverageWasDragged() public onlyForked {
         (address token, address pool) = _tradedLaunch(FeeUses.CREATOR_BALANCE);
-        _holdForTheWindow();
         uint256 owed = locker.protocolOwed(token);
         assertGt(owed, 0);
 
@@ -191,7 +185,7 @@ contract SwapPriceLimitForkTest is ForkFixture {
         deal(token, bob, IERC20(token).balanceOf(bob) * 3);
         uint256 quoteBack = _sell(bob, token, WETH, IERC20(token).balanceOf(bob));
         _nextBlock();
-        _swapIn(bob, WETH, token, quoteBack);
+        _swapIn(bob, WETH, token, quoteBack / 2);
 
         int24 draggedLimit =
             _averageTick(pool) + (token < WETH ? SwapPriceLimit.BUFFER_TICKS : -SwapPriceLimit.BUFFER_TICKS);
@@ -200,20 +194,12 @@ contract SwapPriceLimitForkTest is ForkFixture {
             "the average was dragged more than the buffer below spot"
         );
 
-        int24 spotBound =
-            _currentTick(pool) + (token < WETH ? -2 * SwapPriceLimit.BUFFER_TICKS : 2 * SwapPriceLimit.BUFFER_TICKS);
-        uint256 large = IERC20(token).totalSupply() / 100; // so the limit, not the amount, stops the sale
-        deal(token, address(locker), IERC20(token).balanceOf(address(locker)) + large);
-        stdstore.target(address(locker)).sig("protocolOwed(address)").with_key(token).checked_write(large);
-
-        locker.convertProtocolShare(token);
-        assertEq(_currentTick(pool), spotBound, "stopped twice the buffer from spot, not at the dragged anchor");
-        assertGt(locker.protocolOwed(token), 0, "the rest stays booked");
+        assertEq(locker.convertProtocolShare(token), 0, "nothing sold");
+        assertEq(locker.protocolOwed(token), owed, "the share stays booked");
     }
 
     function test_BuybackSpendsEverythingWhenUnpushed() public onlyForked {
         (address token,) = _tradedLaunch(FeeUses.BUYBACK_BURN);
-        _holdForTheWindow();
         uint256 owedToken = locker.creatorOwed(token, token);
 
         locker.spendCreatorShare(token);

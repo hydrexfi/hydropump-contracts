@@ -279,6 +279,25 @@ contract HydropumpLockerTest is HydropumpFixture {
         assertEq(locker.protocolOwed(token), 10_000e18, "the share stays booked");
     }
 
+    /// A small push held across a block stays within the skip, and the sale anchors to the average (the
+    /// stricter of the two here), not to the pushed open.
+    function test_ConvertingAnchorsToTheAverageAfterASmallHeldPush() public {
+        (address token, address pool) = _launchHere();
+        _accrueFees(token, 40_000e18, 8_000);
+        _seedPoolQuote(token, 1e18);
+        locker.splitRewards(token);
+        router.configure(3_000, 5_000); // a fill big enough that only the limit stops it
+
+        int24 fair = _currentTick(pool);
+        _setSpot(pool, fair + _launchPriceOffset(token, -400));
+        vm.warp(vm.getBlockTimestamp() + 2);
+        vm.roll(vm.getBlockNumber() + 1);
+
+        locker.convertProtocolShare(token);
+        // The average moved ~7 ticks, so the limit is ~520 below fair; anchored to the open it would be 913.
+        assertApproxEqAbs(_currentTick(pool), fair + _launchPriceOffset(token, -520), 2, "stopped 5% below the average");
+    }
+
     /// A pool younger than the averaging window has no average yet, so it falls back to the block open.
     function test_ConvertingOnAYoungPoolFallsBackToTheBlockOpen() public {
         (address token, address pool) = _launchHere();
@@ -295,24 +314,42 @@ contract HydropumpLockerTest is HydropumpFixture {
         assertGt(locker.convertProtocolShare(token), 0, "and an unpushed sale does not wait");
     }
 
-    /// A deep push held for one block drags the average far; after buying back, the sale still stops
-    /// twice the buffer below spot rather than following the dragged anchor down.
-    function test_ConvertingStopsNearSpotAfterTheAverageWasDragged() public {
+    /// A deep push held for one block, then only part-restored, leaves the open far from the average, so the
+    /// sale is skipped rather than anchored to either.
+    function test_ConvertingSkipsAfterTheAverageWasDragged() public {
         (address token, address pool) = _launchHere();
         _accrueFees(token, 40_000e18, 8_000);
         _seedPoolQuote(token, 1e18);
         locker.splitRewards(token);
+
+        int24 fair = _currentTick(pool);
+        _setSpot(pool, fair + _launchPriceOffset(token, -100_000));
+        vm.warp(vm.getBlockTimestamp() + 2);
+        vm.roll(vm.getBlockNumber() + 1);
+        _moveSpotThisBlock(pool, fair + _launchPriceOffset(token, -1_000)); // bought most of the way back
+
+        assertEq(locker.convertProtocolShare(token), 0, "nothing sold");
+        assertEq(locker.protocolOwed(token), 10_000e18, "the share stays booked");
+    }
+
+    /// A young pool has no average, so after a deep push and a buy-back the sale still stops twice the
+    /// buffer below spot rather than following the open down.
+    function test_ConvertingOnAYoungPoolStopsNearSpotAfterADeepPush() public {
+        (address token, address pool) = _launchHere();
+        _accrueFees(token, 40_000e18, 8_000);
+        _seedPoolQuote(token, 1e18);
+        locker.splitRewards(token);
+        vm.warp(vm.getBlockTimestamp() - SwapPriceLimit.AVERAGE_WINDOW); // back to the launch's own second
         router.configure(3_000, 5_000); // a fill big enough that only the limit stops it
 
         int24 fair = _currentTick(pool);
         _setSpot(pool, fair + _launchPriceOffset(token, -100_000));
         vm.warp(vm.getBlockTimestamp() + 2);
         vm.roll(vm.getBlockNumber() + 1);
-        _moveSpotThisBlock(pool, fair); // bought back at the start of the next block
+        _moveSpotThisBlock(pool, fair);
 
         locker.convertProtocolShare(token);
         assertEq(_currentTick(pool), fair + _launchPriceOffset(token, -1026), "stopped twice the buffer below spot");
-        assertGt(locker.protocolOwed(token), 0, "the rest stays booked");
     }
 
     function test_ConvertingNothingIsANoop() public {
