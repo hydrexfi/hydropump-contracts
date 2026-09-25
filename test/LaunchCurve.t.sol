@@ -94,8 +94,9 @@ contract LaunchCurveTest is HydropumpFixture {
         _assertCurveShape(token, HIGH_QUOTE, pool, positionIds);
 
         Band[] memory bands = _bands(positionIds);
+        (, int24 band0Width,) = launcher.band(0);
         assertEq(bands[0].lower, -228_200, "band 0 starts at the price");
-        assertEq(bands[0].upper, -214_200, "and reaches 14,000 ticks above it");
+        assertEq(bands[0].upper, -228_200 + band0Width, "and runs its width above it");
         assertEq(bands[4].upper, -228_200 + 887_200, "the tail runs the full span up");
     }
 
@@ -110,8 +111,9 @@ contract LaunchCurveTest is HydropumpFixture {
         _assertCurveShape(token, LOW_QUOTE, pool, positionIds);
 
         Band[] memory bands = _bands(positionIds);
+        (, int24 band0Width,) = launcher.band(0);
         assertEq(bands[0].upper, 228_200, "band 0 starts at the price");
-        assertEq(bands[0].lower, 214_200, "and reaches 14,000 ticks below it");
+        assertEq(bands[0].lower, 228_200 - band0Width, "and runs its width below it");
         assertEq(bands[4].lower, 228_200 - 887_200, "the tail runs the full span down");
     }
 

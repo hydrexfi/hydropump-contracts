@@ -4,6 +4,7 @@ pragma solidity 0.8.26;
 import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import {HydropumpLauncher} from "../contracts/core/HydropumpLauncher.sol";
 import {HydropumpLocker} from "../contracts/core/HydropumpLocker.sol";
@@ -11,6 +12,7 @@ import {HydropumpToken} from "../contracts/core/HydropumpToken.sol";
 import {PairDirectory} from "../contracts/helpers/PairDirectory.sol";
 import {FeeUseRegistry} from "../contracts/helpers/FeeUseRegistry.sol";
 import {FeeUses} from "../contracts/libraries/FeeUses.sol";
+import {TickMath} from "../contracts/libraries/TickMath.sol";
 import {ISwapRouter} from "../contracts/interfaces/ISwapRouter.sol";
 import {HydropumpFixture} from "./helpers/HydropumpFixture.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
@@ -45,6 +47,39 @@ contract HydropumpLauncherTest is HydropumpFixture {
             assertGe(lower, 0, "band offsets must be distances from the start tick");
             assertGt(upper, 0);
         }
+    }
+
+    /// Net buying to reach a valuation stays near 5% of it (3.5–6.5%) from $100k to $100m on a $5k open.
+    /// Samples the milestones and the top edge of each priced band, where the ratio dips lowest.
+    function test_CurveCostsAboutFivePercentOfTheValuationReached() public view {
+        int24[8] memory ticks = [int24(29_958), 33_999, 39_122, 52_985, 62_999, 76_012, 92_999, 99_039];
+
+        for (uint256 m = 0; m < ticks.length; m++) {
+            uint256 s = _sqrtE18(ticks[m]);
+            uint256 valuationE18 = Math.mulDiv(s, s, 1e18); // multiple of the opening valuation
+            uint256 ratioBps = Math.mulDiv(_costInOpeningValuations(ticks[m]), 10_000, valuationE18);
+            assertGe(ratioBps, 350, "valuation reached too cheaply");
+            assertLe(ratioBps, 650, "valuation reached too dearly");
+        }
+    }
+
+    /// Quote needed to lift the price `tick` above the open, in multiples of the opening valuation.
+    /// Normalised so the open price and the supply are both 1, which makes it quote-agnostic.
+    function _costInOpeningValuations(int24 tick) internal view returns (uint256 cost) {
+        uint256 s = _sqrtE18(tick);
+        for (uint256 i = 0; i < launcher.bandCount(); i++) {
+            (int24 lower, int24 upper, uint256 shareBps) = launcher.band(i);
+            uint256 sa = _sqrtE18(lower);
+            if (s <= sa) break;
+            uint256 sb = _sqrtE18(upper);
+            // L = x / (1/sa - 1/sb), spent = L * (s - sa)
+            uint256 liquidity = Math.mulDiv(shareBps * 1e14, Math.mulDiv(sa, sb, 1e18), sb - sa);
+            cost += Math.mulDiv(liquidity, (s < sb ? s : sb) - sa, 1e18);
+        }
+    }
+
+    function _sqrtE18(int24 tick) internal pure returns (uint256) {
+        return Math.mulDiv(TickMath.getSqrtRatioAtTick(tick), 1e18, 1 << 96);
     }
 
     // =============================

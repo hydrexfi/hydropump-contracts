@@ -73,7 +73,7 @@ contract LaunchCurveForkTest is ForkFixture {
     ///
     /// Measured in multiples of the opening valuation rather than dollars, so it is independent of the
     /// quote token and its decimals: a launch opens at $5k, and reaching $1m means buying it to 200x.
-    function test_ReachingTwoHundredXCostsAboutFourteenTimesTheOpeningValuation() public onlyForked {
+    function test_ReachingTwoHundredXCostsAboutTenTimesTheOpeningValuation() public onlyForked {
         Quote memory q = _quote("WETH");
         _registerQuote(q.token, q.startTick);
         (address token, address pool,,) = _launchOnSide(q.token, true, bytes32(0));
@@ -92,7 +92,7 @@ contract LaunchCurveForkTest is ForkFixture {
 
         assertGe(_fdvUsdE8(pool, q, token), target, "never reached 200x");
 
-        // Spend, expressed in opening valuations. $70k of buying against a $5k opening is 14x.
+        // Spend, expressed in opening valuations. $50k of buying against a $5k opening is 10x: 5% of $1m.
         uint256 spentUsdE8 = Math.mulDiv(spent, q.priceUsdE8, 10 ** q.decimals);
         uint256 multiple = (spentUsdE8 * 100) / openingFdv;
 
@@ -101,8 +101,8 @@ contract LaunchCurveForkTest is ForkFixture {
         console2.log("x opening (hundredths)", multiple);
 
         // Wide bounds: this is a guard against the curve being reweighted by accident, not a price oracle.
-        assertGt(multiple, 1_000, "far cheaper to climb than the curve intends");
-        assertLt(multiple, 2_200, "far dearer to climb than the curve intends");
+        assertGt(multiple, 800, "far cheaper to climb than the curve intends");
+        assertLt(multiple, 1_300, "far dearer to climb than the curve intends");
     }
 
     /// The whole point of the per-quote start tick: every launch opens at the same USD valuation, whatever
