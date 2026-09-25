@@ -137,8 +137,8 @@ contract HydropumpLauncher is Initializable, Ownable2StepUpgradeable, UUPSUpgrad
     }
 
     /// @notice Band `i` as unsigned tick distances from the start tick, plus its share of supply in bps.
-    /// @dev Invariant: net buying to reach a valuation is about 5% of it (4–6.5%) from 20x to 20,000x the
-    ///      open, i.e. $100k to $100m on a $5k open; $1m takes about $50k and sells a third of supply.
+    /// @dev Invariant: net buying to reach a valuation is about 5% of it (3.5–6.5%, lowest at band edges)
+    ///      from 20x to 20,000x the open, i.e. $100k to $100m on a $5k open; $1m takes about $50k.
     ///      Band 0 is deep so the first buys do not run the price, and the tail starts at 177k so the
     ///      book past $100m stays a book rather than a wall.
     /// @dev Offsets, never absolute ticks: a tick encodes a raw wei ratio and shifts with the quote token's
