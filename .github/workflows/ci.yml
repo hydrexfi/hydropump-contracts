@@ -1,13 +1,13 @@
 name: CI
 
-# Three gates, each its own job so a failure is reported by name:
+# Four gates, each its own job so a failure is reported by name:
 #   build     — compiles, stays under the EIP-170 size limit, and is forge-fmt clean
 #   unit      — every test outside test/fork/
 #   storage   — the four upgradeable contracts keep the storage layout of their committed snapshot
+#   fork      — every suite under test/fork/ except test/fork/slow/, against Base via the
+#               BASE_RPC_URL secret. PRs from forks cannot read the secret, so their fork job fails.
 #
-# Fork tests (test/fork/) are NOT run here yet: the public Base RPC rate-limits a full fork run until
-# it stalls, and a private RPC needs a BASE_RPC_URL repository secret, which only an admin can add.
-# Run them locally with `npm run test:fork:strict` (see CLAUDE.md). Restoring the job is tracked in an issue.
+# The slow fork suites (test/fork/slow/, about 15 minutes) run by hand from fork-slow.yml.
 #
 # The Foundry toolchain is pinned (see foundry-version-check.yml for why). Every `version:`
 # input below must stay identical; the version check asserts it.
@@ -61,6 +61,30 @@ jobs:
           version: v1.7.1
       - name: Run unit tests
         run: npm run test:unit
+
+  fork:
+    name: fork tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+      - run: npm ci
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+      # Exits 3, with an "RPC throttled" annotation, when every failure was the RPC rather than the code.
+      - name: Run fork tests
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          FOUNDRY_ETH_RPC_TIMEOUT: 120
+        run: npm run test:fork:strict
 
   # Any change that adds, removes or reorders storage in HydropumpLauncher, HydropumpLocker,
   # PairDirectory or FeeUseRegistry must add a new versioned snapshot in artifacts-storage/.
