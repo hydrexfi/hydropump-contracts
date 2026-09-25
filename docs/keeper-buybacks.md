@@ -9,7 +9,9 @@ protocol fee conversion, creator-balance strategy and Auto-LP remain unchanged.
    The deployment script does this for new deployments using Base's production veHYDX proxy.
 2. Launch with `FeeUses.BUYBACK_BURN` (or have governance repoint an existing launch).
 3. The original launch creator calls `configureBuyback(token, bountyBps)` on that implementation.
-   Choose 250 for 2.5%; 0–250 is accepted. Setup is write-once per token, with no implicit rate.
+   Choose 250 for 2.5%; 0–9,900 is accepted. Setup is write-once per token, with no implicit rate.
+   At the 99% maximum, a fully executed allocation pays 99% to the keeper and uses only 1% for the
+   buyback. Creators should choose this rate carefully; it cannot be changed after setup.
    The creator recipient is not automatically authorized to configure someone else's launch.
 4. A keeper calls `locker.executeKeeperBuyback(token, veTokenId)`. It collects fees and executes
    the buyback atomically. The caller must own that NFT and its current `balanceOfNFT` must be positive.

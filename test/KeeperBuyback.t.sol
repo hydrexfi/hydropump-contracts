@@ -89,11 +89,20 @@ contract KeeperBuybackTest is HydropumpFixture {
         keeperBuyback.configureBuyback(token, 250);
         vm.startPrank(creator);
         vm.expectRevert(KeeperBuybackBurnFeeUse.InvalidBounty.selector);
-        keeperBuyback.configureBuyback(token, 251);
-        keeperBuyback.configureBuyback(token, 250);
+        keeperBuyback.configureBuyback(token, 9901);
+        keeperBuyback.configureBuyback(token, 9900);
         vm.expectRevert(KeeperBuybackBurnFeeUse.AlreadyConfigured.selector);
         keeperBuyback.configureBuyback(token, 0);
         vm.stopPrank();
+    }
+
+    function test_MaxBountyPaysNinetyNinePercent() public {
+        (address token,) = _configured(9900, 1e18);
+        uint256 budget = locker.creatorOwed(token, _quote());
+        _execute(token);
+        assertEq(IERC20(_quote()).balanceOf(keeper), budget * 9900 / 10_000);
+        assertEq(locker.creatorOwed(token, _quote()), 0);
+        assertGt(keeperBuyback.lifetimeBurned(token), 0);
     }
 
     function test_UnconfiguredLaunchCannotSpend() public {
@@ -213,7 +222,7 @@ contract KeeperBuybackTest is HydropumpFixture {
     /// Invariant: spending, bounty and rebooked remainder conserve the allocated quote, excluding donations.
     function testFuzz_BudgetConservation(uint96 amount, uint16 bps, uint16 push) public {
         amount = uint96(bound(amount, 1e6, 1e18));
-        bps = uint16(bound(bps, 0, 250));
+        bps = uint16(bound(bps, 0, 9900));
         push = uint16(bound(push, 0, 600));
         (address token, address pool) = _configured(bps, amount);
         uint256 budget = locker.creatorOwed(token, _quote());

@@ -92,7 +92,7 @@ none depends on anyone else having run:
 | `handleAllRewards(token)` | Both, in one transaction. What the frontend button calls |
 
 New deployments register the keeper buyback strategy. For those launches, the creator first calls
-`configureBuyback(token, bountyBps)` (0–250 bps, write-once), and an active veHYDX NFT owner calls
+`configureBuyback(token, bountyBps)` (0–9,900 bps, write-once), and an active veHYDX NFT owner calls
 `executeKeeperBuyback(token, veTokenId)` instead of the legacy creator-spending methods above.
 The bounty is paid in the paired token only on executed input; unspent balances are rebooked.
 See [keeper buyback setup and migration](docs/keeper-buybacks.md).

@@ -15,7 +15,7 @@ import {IVeHydx} from "../interfaces/IVeHydx.sol";
 contract KeeperBuybackBurnFeeUse is BuybackBurnFeeUse, IKeeperBuyback, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
-    uint16 public constant MAX_BOUNTY_BPS = 250;
+    uint16 public constant MAX_BOUNTY_BPS = 9900;
     IVeHydx public immutable votingEscrow;
 
     struct BuybackConfig {
@@ -40,7 +40,7 @@ contract KeeperBuybackBurnFeeUse is BuybackBurnFeeUse, IKeeperBuyback, Reentranc
         votingEscrow = IVeHydx(votingEscrow_);
     }
 
-    /// @notice Creator's setup step after launch; 250 means a maximum 2.5% of the executed budget.
+    /// @notice Creator's setup step after launch; up to 9900 bps (99%) of the executed budget.
     /// @dev No implicit default: unconfigured launches cannot spend, and the chosen rate cannot change.
     function configureBuyback(address token, uint16 bountyBps) external {
         if (msg.sender != locker.creatorOf(token)) revert NotCreator();
