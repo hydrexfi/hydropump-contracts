@@ -103,8 +103,10 @@ that cannot fill a sell does not stop a creator being paid — but that means th
 not the body runs, and gas estimation will settle on a limit that starves it.
 
 **The protocol's launch-token share is sold into the pool** by `convertProtocolShare`, so only the quote
-token ever reaches the buyback. No price bound: the caller does not choose the price and takes none of the
-output, so a bound could only make the call stuck. `spendRewards` runs it best-effort — if it fails the
+token ever reaches the buyback. The sale, and the buyback-and-burn fee use's purchase, stop 5% worse than
+the stricter of the block's opening price and the pool's two-minute average (`SwapPriceLimit`). Whatever
+does not fill stays booked for a later call. A pool younger than two minutes has no average yet, so its
+fee swaps wait until it is two minutes old. `spendRewards` runs the sale best-effort — if it fails the
 share stays in `protocolOwed` for a later call.
 
 **The protocol side is pulled, not pushed.** `sweepProtocol` is a separate call because the buyback holds
