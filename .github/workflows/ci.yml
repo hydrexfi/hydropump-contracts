@@ -83,7 +83,6 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: v1.7.1
-      # Exits 3, with an "RPC throttled" annotation, when every failure was the RPC rather than the code.
       - name: Run fork tests
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}

@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 # Run the fork suites and fail unless they really forked.
 #
-#   forkTestStrict.sh [--slow] [forge args...]
-#
-# Default: every suite under test/fork/ except test/fork/slow/. With --slow: only test/fork/slow/,
-# the suites too long to run on every PR (see .github/workflows/fork-slow.yml).
+#   forkTestStrict.sh [--slow] [forge args...]    (--slow: only test/fork/slow/; default: everything else)
 #
 # Without a working BASE_RPC_URL every fork test skips instead of failing, so `forge test` exits 0
 # having tested nothing. This wrapper fails when:
