@@ -13,7 +13,7 @@ import {PairDirectory} from "../../contracts/helpers/PairDirectory.sol";
 import {FeeUseRegistry} from "../../contracts/helpers/FeeUseRegistry.sol";
 import {CreatorBalanceFeeUse} from "../../contracts/feeuses/CreatorBalanceFeeUse.sol";
 import {AutoLpFeeUse} from "../../contracts/feeuses/AutoLpFeeUse.sol";
-import {BuybackBurnFeeUse} from "../../contracts/feeuses/BuybackBurnFeeUse.sol";
+import {KeeperBuybackBurnFeeUse} from "../../contracts/feeuses/KeeperBuybackBurnFeeUse.sol";
 import {FeeUses} from "../../contracts/libraries/FeeUses.sol";
 import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.sol";
 
@@ -100,7 +100,8 @@ contract DeployHydropump is Script {
         // and nothing to rescue.
         CreatorBalanceFeeUse creatorBalance = new CreatorBalanceFeeUse(address(locker));
         AutoLpFeeUse autoLp = new AutoLpFeeUse(address(locker));
-        BuybackBurnFeeUse buybackBurn = new BuybackBurnFeeUse(address(locker));
+        KeeperBuybackBurnFeeUse buybackBurn =
+            new KeeperBuybackBurnFeeUse(address(locker), HydropumpAddresses.VOTING_ESCROW);
 
         registry.registerFeeUse(FeeUses.CREATOR_BALANCE, address(creatorBalance));
         registry.registerFeeUse(FeeUses.AUTO_LP, address(autoLp));

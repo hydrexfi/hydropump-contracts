@@ -20,7 +20,7 @@ contract MockERC20 is ERC20 {
         blocked[account] = isBlocked;
     }
 
-    function _update(address from, address to, uint256 value) internal override {
+    function _update(address from, address to, uint256 value) internal virtual override {
         if (blocked[from]) revert TransferBlocked(from);
         if (blocked[to]) revert TransferBlocked(to);
         super._update(from, to, value);

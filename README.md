@@ -27,6 +27,7 @@ contracts/
 | `CreatorBalanceFeeUse` | no          | Creator share is paid straight to the creator's recipient                            |
 | `AutoLpFeeUse`         | no          | Creator share goes back into the launch's own locked curve, permanently              |
 | `BuybackBurnFeeUse`    | no          | Creator share buys the token in its own pool and burns it                            |
+| `KeeperBuybackBurnFeeUse` | no       | Per-launch bounty and active veHYDX-owner execution; used by new deployments         |
 | `HydropumpBuyback`     | no          | Quote → HYDX via KyberSwap, then bribes the Hydropump gauge                          |
 | `HydropumpGaugeToken`  | no          | Placeholder ERC20 for the pair the Hydropump gauge hangs off                         |
 | `HydropumpRewardDistributor` | no    | Operator credits rewards, recipients withdraw. Owner can rewrite and withdraw        |
@@ -81,7 +82,7 @@ contracts/
 
 ### Where the fees go
 
-Three entry points on the locker, all permissionless and none of them pointable. Each collects first, so
+The legacy strategy entry points are permissionless and none of them pointable. Each collects first, so
 none depends on anyone else having run:
 
 | | |
@@ -89,6 +90,12 @@ none depends on anyone else having run:
 | `handleCreatorRewards(token)` | Spends the creator's 75% on whatever the launch chose |
 | `handleProtocolRewards(token)` | Converts the protocol's 25% to the pair asset and delivers it to the buyback |
 | `handleAllRewards(token)` | Both, in one transaction. What the frontend button calls |
+
+New deployments register the keeper buyback strategy. For those launches, the creator first calls
+`configureBuyback(token, bountyBps)` (0–250 bps, write-once), and an active veHYDX NFT owner calls
+`executeKeeperBuyback(token, veTokenId)` instead of the legacy creator-spending methods above.
+The bounty is paid in the paired token only on executed input; unspent balances are rebooked.
+See [keeper buyback setup and migration](docs/keeper-buybacks.md).
 
 Underneath are the primitives, for one step at a time: `splitRewards` (collect and book),
 `spendCreatorShare`, `convertProtocolShare`, `sweepProtocol`.
