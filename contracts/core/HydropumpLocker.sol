@@ -417,7 +417,7 @@ contract HydropumpLocker is
 
     /// @notice Sell the protocol's launch-token share into the launch's own pool, so only the quote token
     ///         ever reaches the buyback. Permissionless; every destination is fixed.
-    /// @dev Fills only within `SwapPriceLimit`; the rest stays in `protocolOwed` for a later block.
+    /// @dev Fills only within `SwapPriceLimit`; the rest stays in `protocolOwed` for later calls.
     ///      Kept apart from `splitRewards` so a pool that cannot fill never blocks a split.
     function convertProtocolShare(address token) external nonReentrant returns (uint256 quoteOut) {
         Launch storage launch = _launches[token];

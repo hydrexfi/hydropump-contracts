@@ -253,11 +253,10 @@ abstract contract ForkFixture is Test {
         _ageTwapWindow(token, quoteToken);
     }
 
-    /// @dev Kept as a plain "let some time pass" so tests that want a pool with history still read that
-    ///      way. Nothing prices off an oracle any more, so it is no longer load-bearing.
+    /// @dev Gives the pool a price history longer than `SwapPriceLimit.AVERAGE_WINDOW`.
     function _ageTwapWindow(address token, address quoteToken) internal {
-        vm.warp(block.timestamp + 1_200);
-        vm.roll(block.number + 600);
+        vm.warp(vm.getBlockTimestamp() + 1_200);
+        vm.roll(vm.getBlockNumber() + 600);
         _swapIn(poker, quoteToken, token, 1e12);
     }
 

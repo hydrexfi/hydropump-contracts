@@ -12,7 +12,7 @@ import {IAlgebraPool} from "../../contracts/interfaces/IAlgebraPool.sol";
 import {ForkFixture} from "./helpers/ForkFixture.sol";
 
 /// @notice `SwapPriceLimit` against live Hydrex: the real plugin, the real router's partial fill, and a
-///         same-block push on both fee swaps. Launch token as token0; the mirrored suite runs token1.
+///         push on both fee swaps. Launch token as token0; the mirrored suite runs token1.
 contract SwapPriceLimitForkTest is ForkFixture {
     using stdStorage for StdStorage;
 
@@ -20,19 +20,20 @@ contract SwapPriceLimitForkTest is ForkFixture {
         return true;
     }
 
-    /// @dev Real fees split, `bob` holding launch tokens to push with, and a fresh block.
+    /// @dev Real fees split, `bob` holding launch tokens to push with, and the price settled for the window.
     function _tradedLaunch(bytes32 feeUse) internal returns (address token, address pool) {
         (token, pool,,) = _launchOnSide(WETH, _wantToken0(), feeUse);
         _passLaunchWindow();
         _tradeBothWaysAndAge(token, WETH, 2 ether);
         _swapIn(bob, WETH, token, 1 ether);
         locker.splitRewards(token);
-        _nextBlock();
+        vm.warp(vm.getBlockTimestamp() + SwapPriceLimit.AVERAGE_WINDOW);
+        vm.roll(vm.getBlockNumber() + SwapPriceLimit.AVERAGE_WINDOW / 2);
     }
 
     function _nextBlock() internal {
-        vm.warp(block.timestamp + 2);
-        vm.roll(block.number + 1);
+        vm.warp(vm.getBlockTimestamp() + 2);
+        vm.roll(vm.getBlockNumber() + 1);
     }
 
     function _limit(address token, int24 open, bool launchPriceDown) internal pure returns (uint160) {
@@ -47,6 +48,13 @@ contract SwapPriceLimitForkTest is ForkFixture {
         (price,,,,,) = IAlgebraPool(pool).globalState();
     }
 
+    function _averageTick(address pool) internal view returns (int24) {
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = SwapPriceLimit.AVERAGE_WINDOW;
+        (int56[] memory cumulatives,) = IAlgebraPlugin(IAlgebraPool(pool).plugin()).getTimepoints(secondsAgos);
+        return int24((cumulatives[1] - cumulatives[0]) / int56(uint56(SwapPriceLimit.AVERAGE_WINDOW)));
+    }
+
     /// The assumption the limit rests on: the timepoint holds the tick from before the block's first swap.
     function test_PluginRecordsWhereTheBlockOpened() public onlyForked {
         (address token, address pool) = _tradedLaunch(FeeUses.CREATOR_BALANCE);
@@ -56,7 +64,7 @@ contract SwapPriceLimitForkTest is ForkFixture {
         _sell(bob, token, WETH, IERC20(token).balanceOf(bob) / 2);
         _sell(bob, token, WETH, IERC20(token).balanceOf(bob));
 
-        assertEq(plugin.lastTimepointTimestamp(), uint32(block.timestamp), "written this block");
+        assertEq(plugin.lastTimepointTimestamp(), uint32(vm.getBlockTimestamp()), "written this block");
         (,,,, int24 recorded,,) = plugin.timepoints(plugin.timepointIndex());
         assertEq(recorded, open, "holding the tick from before the first swap");
         assertTrue(_currentTick(pool) != open, "while spot moved on");
@@ -120,6 +128,68 @@ contract SwapPriceLimitForkTest is ForkFixture {
         assertEq(locker.creatorOwed(token, WETH), owedQuote, "the quote is booked back");
         assertEq(IERC20(WETH).balanceOf(address(buybackBurn)), 0, "and none left in the fee use");
         assertEq(_sqrtPrice(pool), pushed, "and the pool was not touched");
+    }
+
+    function test_ConversionSellsNothingIntoAPushHeldAcrossABlock() public onlyForked {
+        (address token, address pool) = _tradedLaunch(FeeUses.CREATOR_BALANCE);
+        uint256 owed = locker.protocolOwed(token);
+        assertGt(owed, 0);
+
+        // Half as much again as bob bought: past the average's buffer, but still inside the pool's liquidity.
+        deal(token, bob, IERC20(token).balanceOf(bob) * 3 / 2);
+        _sell(bob, token, WETH, IERC20(token).balanceOf(bob));
+        _nextBlock();
+        int24 averageLimit =
+            _averageTick(pool) + (token < WETH ? -SwapPriceLimit.BUFFER_TICKS : SwapPriceLimit.BUFFER_TICKS);
+        assertTrue(
+            token < WETH ? _currentTick(pool) < averageLimit : _currentTick(pool) > averageLimit,
+            "the push held past the buffer from the average"
+        );
+
+        assertEq(locker.convertProtocolShare(token), 0, "nothing sold into the held push");
+        assertEq(locker.protocolOwed(token), owed, "the share stays booked");
+    }
+
+    /// The live plugin refuses an average older than the pool, so the buyback uses the open alone.
+    function test_AYoungPoolsBuybackFallsBackToTheBlockOpen() public onlyForked {
+        (address token, address pool,,) = _launchOnSide(WETH, _wantToken0(), FeeUses.BUYBACK_BURN);
+        _passLaunchWindow();
+        _swapIn(alice, WETH, token, 1 ether);
+        locker.splitRewards(token);
+        _nextBlock();
+        uint256 owedQuote = locker.creatorOwed(token, WETH);
+        assertGt(owedQuote, 0);
+
+        uint32[] memory secondsAgos = new uint32[](2);
+        secondsAgos[0] = SwapPriceLimit.AVERAGE_WINDOW;
+        IAlgebraPlugin plugin = IAlgebraPlugin(IAlgebraPool(pool).plugin());
+        vm.expectRevert();
+        plugin.getTimepoints(secondsAgos);
+
+        locker.spendCreatorShare(token);
+        assertLt(locker.creatorOwed(token, WETH), owedQuote, "the buyback went ahead");
+    }
+
+    function test_ConversionSkipsAfterTheAverageWasDragged() public onlyForked {
+        (address token, address pool) = _tradedLaunch(FeeUses.CREATOR_BALANCE);
+        uint256 owed = locker.protocolOwed(token);
+        assertGt(owed, 0);
+
+        // Three times what bob bought takes the price past all the liquidity, towards the bottom tick.
+        deal(token, bob, IERC20(token).balanceOf(bob) * 3);
+        uint256 quoteBack = _sell(bob, token, WETH, IERC20(token).balanceOf(bob));
+        _nextBlock();
+        _swapIn(bob, WETH, token, quoteBack / 2);
+
+        int24 draggedLimit =
+            _averageTick(pool) + (token < WETH ? SwapPriceLimit.BUFFER_TICKS : -SwapPriceLimit.BUFFER_TICKS);
+        assertTrue(
+            token < WETH ? _currentTick(pool) > draggedLimit : _currentTick(pool) < draggedLimit,
+            "the average was dragged more than the buffer below spot"
+        );
+
+        assertEq(locker.convertProtocolShare(token), 0, "nothing sold");
+        assertEq(locker.protocolOwed(token), owed, "the share stays booked");
     }
 
     function test_BuybackSpendsEverythingWhenUnpushed() public onlyForked {

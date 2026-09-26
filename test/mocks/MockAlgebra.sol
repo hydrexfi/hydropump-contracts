@@ -52,12 +52,48 @@ contract MockAlgebraPool {
     address public plugin = address(this);
     uint16 public pluginConfig = 1; // BEFORE_SWAP_FLAG
 
+    // Price history: `_ticks[i]` is the tick in force from `_since[i]` until the next entry.
+    uint32[] internal _since;
+    int24[] internal _ticks;
+
+    error targetIsTooOld();
+
     function init(address _token0, address _token1, int24 _tickSpacing, uint160 _price) external {
         (token0, token1, tickSpacing, price) = (_token0, _token1, _tickSpacing, _price);
+        _recordPrice();
     }
 
     function setPrice(uint160 _price) external {
         price = _price;
+        _recordPrice();
+    }
+
+    function _recordPrice() internal {
+        int24 tick = MockTickMath.tickAtSqrtRatio(price);
+        if (_since.length > 0 && _since[_since.length - 1] == block.timestamp) {
+            _ticks[_ticks.length - 1] = tick;
+        } else {
+            _since.push(uint32(block.timestamp));
+            _ticks.push(tick);
+        }
+    }
+
+    /// @dev Integrates the price history, reverting like Algebra for a window older than the pool.
+    function getTimepoints(uint32[] memory secondsAgos)
+        external
+        view
+        returns (int56[] memory tickCumulatives, uint88[] memory volatilityCumulatives)
+    {
+        tickCumulatives = new int56[](secondsAgos.length);
+        volatilityCumulatives = new uint88[](secondsAgos.length);
+        for (uint256 i = 0; i < secondsAgos.length; i++) {
+            if (uint256(secondsAgos[i]) + _since[0] > block.timestamp) revert targetIsTooOld();
+            uint32 target = uint32(block.timestamp - secondsAgos[i]);
+            for (uint256 j = 0; j < _since.length && _since[j] < target; j++) {
+                uint32 end = j + 1 < _since.length && _since[j + 1] < target ? _since[j + 1] : target;
+                tickCumulatives[i] += int56(_ticks[j]) * int56(uint56(end - _since[j]));
+            }
+        }
     }
 
     function setPlugin(address _plugin, uint16 _pluginConfig) external {
