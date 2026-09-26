@@ -200,7 +200,7 @@ Both pair orderings are exercised throughout, because which one a launch gets is
 | `HydropumpBuyback` | `0x356a1946cC92b8EC64d5c446fD6fbA550F8967f0` |
 | `HydropumpRewardDistributor` | `0x7f14E1850B81A51487120290d32472cB94cc2446` |
 
-Deployed at block `51785877`. Indexed by `hydrex-hydropump/1.0.0`.
+Deployed at block `51785877`. Indexed by the periphery subgraph (`periphery/v0.0.9`, served at `periphery-subgraph.hydrex.fi`).
 
 ## Deploy
 
