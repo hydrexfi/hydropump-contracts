@@ -55,10 +55,40 @@ Never edit an existing snapshot file. Constants, immutables and transient storag
 
 - **Fail, fix, pass.** Write the test that reproduces the defect first, see it fail on the unfixed code,
   then fix. Record both results in the PR.
-- State the function's precondition, postcondition or invariant in NatSpec where the fix changes it.
+- State the function's precondition, postcondition or invariant in NatSpec where the fix changes it,
+  to the standard below. Change only the lines the fix needs: never rewrite or expand a comment it
+  does not require. In `contracts/`, comment lines added should not outgrow code lines added; longer
+  explanation belongs in the PR body.
 - One finding per commit, with its own test.
 - Commits follow Conventional Commits: `type(scope): subject`, imperative, lowercase, ≤ 72 characters.
   Security-relevant commits say so. A `fix` body names the defect class and how many sites have it.
+
+## Comments and NatSpec
+
+Say each fact once, in the place that owns it. Audit and finding IDs, design history, alternatives
+considered and test provenance ("adapted from the review's test_CG6") go in the commit message and
+the PR body, never in the code.
+
+- **External and public functions:** a one-sentence `@notice` saying what it does for a caller.
+- **`@dev`, only when needed:** preconditions, what it reverts on, who gets paid, trust assumptions.
+  Short bullets, one line each, usually 0–4 lines in total.
+- **`@param` and `@return`:** only where the name and type do not already say it — units, bps,
+  "0 means skip".
+- **Contract-level `@dev`:** state the key invariants once and number them (I1, I2…). Elsewhere write
+  "relies on I1" rather than restating one.
+- **Internal and private functions:** no NatSpec by default. One line only if it carries an invariant.
+- **Inline comments:** why, not what, in one line. Use them for non-obvious ordering or arithmetic;
+  OpenZeppelin requires one on every `unchecked` block.
+- **Tests:** the test name is the specification. Comment only where the setup is non-obvious.
+
+Worked example. `deliverProtocolShareFromSelf` carried nine lines of NatSpec; one line drops the
+precondition that makes the function necessary. The standard gives three:
+
+```solidity
+/// @notice Deliver the protocol share from inside `handleAllRewards`' try block.
+/// @dev Requirements: the caller is this contract, and the reentrancy guard is held.
+///      `try` needs an external call, and `deliverProtocolShare` would hit the held guard.
+```
 
 ## Definition of done
 

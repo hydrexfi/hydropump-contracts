@@ -55,7 +55,12 @@ rule working. Log it and move on; do not reason your way past it.
    file or NatSpec a fix relies on is wrong, correct it in its own commit, keep going, and say so loudly
    in the report. This is not a hard stop.
 
-8. **`~/engagements/` is read-only.** Proof-of-concept tests from the security review live there; copy
+8. **Comments follow the standard in `CLAUDE.md` ("Comments and NatSpec").** It is written there
+   once: read it before annotating a fix, and do not restate it here or in the code. In short: say
+   each fact once, keep `@dev` to the preconditions and reverts a caller needs, and leave finding
+   IDs, design history and test provenance to the commit message and the PR body.
+
+9. **`~/engagements/` is read-only.** Proof-of-concept tests from the security review live there; copy
    and adapt them into `test/`, never edit them in place.
 
 ---
