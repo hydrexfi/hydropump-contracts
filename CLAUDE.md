@@ -2,8 +2,9 @@
 
 Hydropump is a permissionless token launchpad on Hydrex (Base). The launcher deploys a token, opens its
 Algebra pool against a whitelisted quote token and mints single-sided liquidity bands; the locker holds
-those position NFTs forever and splits their trading fees between the creator (spent through a fee use:
-creator balance, buyback-and-burn or auto-LP) and the protocol. `README.md` describes the design.
+those position NFTs (forever, unless the rotator retires the launch) and splits their trading fees between
+the creator (spent through a fee use: creator balance, buyback-and-burn or auto-LP) and the protocol.
+`README.md` describes the design.
 
 Findings labelled `HP-01` … `HP-23` refer to the internal security review of 23 September 2026
 (commit `24eb16c`). A work order or PR that fixes one names it in brackets after a plain description.

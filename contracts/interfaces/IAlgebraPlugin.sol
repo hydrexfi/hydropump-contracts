@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity 0.8.26;
 
-/// @notice What `SwapPriceLimit` reads from Algebra's base plugin.
+/// @notice What `SwapPriceLimit` and `HydropumpRotator` read from Algebra's base plugin.
 interface IAlgebraPlugin {
     function timepointIndex() external view returns (uint16);
 
@@ -19,4 +19,10 @@ interface IAlgebraPlugin {
             int24 averageTick,
             uint16 windowStartIndex
         );
+
+    /// @return tickCumulatives Tick × seconds, accumulated, at each of `secondsAgos` before now.
+    function getTimepoints(uint32[] calldata secondsAgos)
+        external
+        view
+        returns (int56[] memory tickCumulatives, uint88[] memory volatilityCumulatives);
 }
