@@ -49,18 +49,43 @@ contract HydropumpLauncherTest is HydropumpFixture {
         }
     }
 
-    /// Net buying to reach a valuation stays near 5% of it (3.5–6.5%) from $100k to $100m on a $5k open.
-    /// Samples the milestones and the top edge of each priced band, where the ratio dips lowest.
-    function test_CurveCostsAboutFivePercentOfTheValuationReached() public view {
-        int24[8] memory ticks = [int24(29_958), 33_999, 39_122, 52_985, 62_999, 76_012, 92_999, 99_039];
-
-        for (uint256 m = 0; m < ticks.length; m++) {
-            uint256 s = _sqrtE18(ticks[m]);
-            uint256 valuationE18 = Math.mulDiv(s, s, 1e18); // multiple of the opening valuation
-            uint256 ratioBps = Math.mulDiv(_costInOpeningValuations(ticks[m]), 10_000, valuationE18);
-            assertGe(ratioBps, 350, "valuation reached too cheaply");
-            assertLe(ratioBps, 650, "valuation reached too dearly");
+    /// Net buying to reach a valuation is 12–15% of it from $25k to $1m on a $5k open (5x to 200x).
+    /// Walks every 250 ticks, plus each band's top edge where the ratio dips lowest.
+    function test_CurveCostsTwelveToFifteenPercentUpToOneMillion() public view {
+        int24[3] memory edges = [int24(25_999), 40_999, 41_000];
+        for (uint256 m = 0; m < edges.length; m++) {
+            _assertTwelveToFifteen(edges[m]);
         }
+        for (int24 tick = 16_095; tick <= 52_983; tick += 250) {
+            _assertTwelveToFifteen(tick);
+        }
+    }
+
+    function _assertTwelveToFifteen(int24 tick) internal view {
+        uint256 ratioBps = _costRatioBps(tick);
+        assertGe(ratioBps, 1_200, "valuation reached too cheaply");
+        assertLe(ratioBps, 1_500, "valuation reached too dearly");
+    }
+
+    /// Past $1m the ratio tapers, from $1.5m to $100m (300x to 20,000x), without the book running dry.
+    function test_CurveTapersPastOneMillion() public view {
+        int24[5] memory ticks = [int24(56_999), 62_146, 69_078, 76_009, 99_039];
+
+        uint256 previous = type(uint256).max;
+        for (uint256 m = 0; m < ticks.length; m++) {
+            uint256 ratioBps = _costRatioBps(ticks[m]);
+            assertLt(ratioBps, 1_200, "past $1m the ratio should taper below the band");
+            assertLt(ratioBps, previous, "and keep falling");
+            previous = ratioBps;
+        }
+        assertGe(previous, 150, "the tail still has a book at $100m");
+    }
+
+    /// Net buying to lift the price `tick` above the open, in bps of the valuation it reaches.
+    function _costRatioBps(int24 tick) internal view returns (uint256) {
+        uint256 s = _sqrtE18(tick);
+        uint256 valuationE18 = Math.mulDiv(s, s, 1e18); // multiple of the opening valuation
+        return Math.mulDiv(_costInOpeningValuations(tick), 10_000, valuationE18);
     }
 
     /// Quote needed to lift the price `tick` above the open, in multiples of the opening valuation.

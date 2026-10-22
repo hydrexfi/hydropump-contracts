@@ -51,10 +51,11 @@ contracts/
 ## How a launch works
 
 - **Supply** 10,000,000,000, all of it deployed as liquidity. Nothing is held back.
-- **Bands** five, at tick offsets `0 / 34k / 63k / 93k / 177k / 887.2k` from the start tick, holding
-  `20 / 14.5 / 15.5 / 19 / 31%` of supply. Net buying to reach a valuation is about 5% of it (3.5–6.5%)
-  from $100k to $100m: $1m takes about $50k and sells a third of supply. Offsets, not absolute ticks, so
-  the curve is quote-agnostic, and unsigned distances rather than directions — see **Pair ordering**.
+- **Bands** five, at tick offsets `0 / 12k / 26k / 41k / 57k / 887.2k` from the start tick, holding
+  `22 / 21 / 20 / 20 / 17%` of supply. Net buying to reach a valuation is 12–15% of it from $25k to $1m:
+  $1m takes about $127k and sells ~79% of supply. Past $1m it tapers, to ~2% at $100m. Offsets, not
+  absolute ticks, so the curve is quote-agnostic, and unsigned distances rather than directions — see
+  **Pair ordering**.
   Bands are aligned to the pool's actual tick spacing at launch time, and band 0 is always the one
   adjacent to the opening price.
 - **Start tick** per quote token, in the **directory**, refreshed as the quote's USD price moves. No oracle.
