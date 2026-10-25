@@ -34,9 +34,12 @@ contract BuybackBurnFeeUse is IFeeUse {
         locker = IHydropumpLocker(_locker);
     }
 
-    function onFees(address token, address[] calldata assets, uint256[] calldata amounts) external {
+    function onFees(address token, address[] calldata assets, uint256[] calldata amounts) external virtual {
         if (msg.sender != address(locker)) revert NotLocker();
+        _handleFees(token, assets, amounts);
+    }
 
+    function _handleFees(address token, address[] calldata assets, uint256[] calldata amounts) internal {
         address quoteToken = locker.quoteTokenOf(token);
 
         uint256 quoteAmount;
@@ -61,6 +64,15 @@ contract BuybackBurnFeeUse is IFeeUse {
     }
 
     function _buy(address token, address quoteToken, uint256 quoteAmount)
+        internal
+        virtual
+        returns (uint256 quoteSpent, uint256 bought)
+    {
+        (quoteSpent, bought) = _swapQuote(token, quoteToken, quoteAmount);
+        _returnQuote(token, quoteToken, quoteAmount - quoteSpent);
+    }
+
+    function _swapQuote(address token, address quoteToken, uint256 quoteAmount)
         internal
         returns (uint256 quoteSpent, uint256 bought)
     {
@@ -87,8 +99,9 @@ contract BuybackBurnFeeUse is IFeeUse {
             // What arrived, not the router's figure: in the launch window the token taxes the buy.
             bought = IERC20(token).balanceOf(address(this)) - heldToken;
         }
+    }
 
-        uint256 unspent = quoteAmount - quoteSpent;
+    function _returnQuote(address token, address quoteToken, uint256 unspent) internal {
         if (unspent > 0) {
             IERC20(quoteToken).safeTransfer(address(locker), unspent);
             emit QuoteReturned(token, unspent);

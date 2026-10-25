@@ -33,4 +33,7 @@ library HydropumpAddresses {
 
     /// @notice HYDX, the token the protocol fee share is bought back into
     address internal constant HYDX = 0x00000e7efa313F4E11Bfff432471eD9423AC6B30;
+
+    /// @notice Production veHYDX (Hydrex VotingEscrowV2 proxy) on Base.
+    address internal constant VOTING_ESCROW = 0x25B2ED7149fb8A05f6eF9407d9c8F878f59cd1e1;
 }
