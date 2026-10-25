@@ -7,6 +7,11 @@ interface IAlgebraPlugin {
 
     function lastTimepointTimestamp() external view returns (uint32);
 
+    function getTimepoints(uint32[] memory secondsAgos)
+        external
+        view
+        returns (int56[] memory tickCumulatives, uint88[] memory volatilityCumulatives);
+
     function timepoints(uint256 index)
         external
         view

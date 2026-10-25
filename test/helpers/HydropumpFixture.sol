@@ -14,6 +14,7 @@ import {AutoLpFeeUse} from "../../contracts/feeuses/AutoLpFeeUse.sol";
 import {BuybackBurnFeeUse} from "../../contracts/feeuses/BuybackBurnFeeUse.sol";
 import {FeeUses} from "../../contracts/libraries/FeeUses.sol";
 import {HydropumpAddresses} from "../../contracts/libraries/HydropumpAddresses.sol";
+import {SwapPriceLimit} from "../../contracts/libraries/SwapPriceLimit.sol";
 import {TickMath} from "../../contracts/libraries/TickMath.sol";
 import {MockAlgebra, MockAlgebraPool, MockSwapRouter} from "../mocks/MockAlgebra.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
@@ -161,6 +162,8 @@ abstract contract HydropumpFixture is Test {
                 feeUse: feeUse
             })
         );
+        // Give the pool a price history, as any pool with fees to swap has.
+        vm.warp(vm.getBlockTimestamp() + SwapPriceLimit.AVERAGE_WINDOW);
     }
 
     function _launch(address quoteToken) internal returns (address token, address pool, uint256[] memory ids) {

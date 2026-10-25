@@ -4,6 +4,7 @@ pragma solidity 0.8.26;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {HydropumpLocker} from "../contracts/core/HydropumpLocker.sol";
+import {SwapPriceLimit} from "../contracts/libraries/SwapPriceLimit.sol";
 import {HydropumpFixture} from "./helpers/HydropumpFixture.sol";
 import {MockAlgebraPool} from "./mocks/MockAlgebra.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
@@ -242,7 +243,7 @@ contract HydropumpLockerTest is HydropumpFixture {
         assertLt(left, 10_000e18);
         assertEq(_currentTick(pool), open + _launchPriceOffset(token, -513), "stopped at the buffer");
 
-        vm.warp(block.timestamp + 2);
+        vm.warp(vm.getBlockTimestamp() + 2);
         locker.convertProtocolShare(token);
         assertLt(locker.protocolOwed(token), left);
     }
@@ -261,6 +262,73 @@ contract HydropumpLockerTest is HydropumpFixture {
             assertEq(locker.convertProtocolShare(token), 0);
             assertEq(locker.protocolOwed(token), 10_000e18, "the share stays booked");
         }
+    }
+
+    /// A small held push stays under the skip, so the stricter anchor (the average) sets the limit.
+    function test_ConvertingAnchorsToTheAverageAfterASmallHeldPush() public {
+        (address token, address pool) = _launchHere();
+        _accrueFees(token, 40_000e18, 8_000);
+        _seedPoolQuote(token, 1e18);
+        locker.splitRewards(token);
+        router.configure(3_000, 5_000); // a fill big enough that only the limit stops it
+
+        int24 fair = _currentTick(pool);
+        _setSpot(pool, fair + _launchPriceOffset(token, -400));
+        vm.warp(vm.getBlockTimestamp() + 2);
+        vm.roll(vm.getBlockNumber() + 1);
+
+        locker.convertProtocolShare(token);
+        assertApproxEqAbs(_currentTick(pool), fair + _launchPriceOffset(token, -520), 2, "stopped 5% below the average");
+    }
+
+    function test_ConvertingOnAYoungPoolFallsBackToTheBlockOpen() public {
+        (address token, address pool) = _launchHere();
+        _accrueFees(token, 40_000e18, 8_000);
+        _seedPoolQuote(token, 1e18);
+        locker.splitRewards(token);
+        vm.warp(vm.getBlockTimestamp() - SwapPriceLimit.AVERAGE_WINDOW); // back to the launch's own second
+
+        int24 open = _currentTick(pool);
+        _moveSpotThisBlock(pool, open + _launchPriceOffset(token, -600));
+        assertEq(locker.convertProtocolShare(token), 0, "the block open still refuses a push");
+
+        _setSpot(pool, open);
+        assertGt(locker.convertProtocolShare(token), 0, "and an unpushed sale does not wait");
+    }
+
+    /// A deep one-block push, part-restored, leaves the open far from the average.
+    function test_ConvertingSkipsAfterTheAverageWasDragged() public {
+        (address token, address pool) = _launchHere();
+        _accrueFees(token, 40_000e18, 8_000);
+        _seedPoolQuote(token, 1e18);
+        locker.splitRewards(token);
+
+        int24 fair = _currentTick(pool);
+        _setSpot(pool, fair + _launchPriceOffset(token, -100_000));
+        vm.warp(vm.getBlockTimestamp() + 2);
+        vm.roll(vm.getBlockNumber() + 1);
+        _moveSpotThisBlock(pool, fair + _launchPriceOffset(token, -1_000));
+
+        assertEq(locker.convertProtocolShare(token), 0, "nothing sold");
+        assertEq(locker.protocolOwed(token), 10_000e18, "the share stays booked");
+    }
+
+    function test_ConvertingOnAYoungPoolStopsNearSpotAfterADeepPush() public {
+        (address token, address pool) = _launchHere();
+        _accrueFees(token, 40_000e18, 8_000);
+        _seedPoolQuote(token, 1e18);
+        locker.splitRewards(token);
+        vm.warp(vm.getBlockTimestamp() - SwapPriceLimit.AVERAGE_WINDOW); // back to the launch's own second
+        router.configure(3_000, 5_000); // a fill big enough that only the limit stops it
+
+        int24 fair = _currentTick(pool);
+        _setSpot(pool, fair + _launchPriceOffset(token, -100_000));
+        vm.warp(vm.getBlockTimestamp() + 2);
+        vm.roll(vm.getBlockNumber() + 1);
+        _moveSpotThisBlock(pool, fair);
+
+        locker.convertProtocolShare(token);
+        assertEq(_currentTick(pool), fair + _launchPriceOffset(token, -1026), "stopped twice the buffer below spot");
     }
 
     function test_ConvertingNothingIsANoop() public {
