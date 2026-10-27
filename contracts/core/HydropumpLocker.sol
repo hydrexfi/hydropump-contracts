@@ -18,7 +18,8 @@ import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
 import {SwapPriceLimit} from "../libraries/SwapPriceLimit.sol";
 
 /// @title HydropumpLocker
-/// @notice Holds every launch's positions permanently and splits the fees they earn.
+/// @notice Holds every launch's positions and splits the fees they earn. A launch registered after the
+///         rotator was first set can have its liquidity released to the rotator once; nothing else is.
 contract HydropumpLocker is
     Initializable,
     Ownable2StepUpgradeable,
@@ -71,8 +72,16 @@ contract HydropumpLocker is
     ///         by `spendCreatorShare`.
     mapping(address token => mapping(address asset => uint256)) public creatorOwed;
 
+    /// @notice The only caller of `releaseLiquidity`.
+    address public rotator;
+    /// @notice When the rotator was first set. Launches registered at or before it are never released.
+    uint64 public rotationStart;
+
+    /// @notice Launches whose liquidity has gone to the rotator. Their positions stay here, empty.
+    mapping(address token => bool) public released;
+
     /// @dev Reserved so added storage does not shift the layout. Keep vars + gap == 50.
-    uint256[41] private __gap;
+    uint256[39] private __gap;
 
     event LaunchRegistered(
         address indexed token,
@@ -106,6 +115,13 @@ contract HydropumpLocker is
         address indexed token, address indexed feeUse, uint256 launchTokenAmount, uint256 quoteAmount
     );
     event ProtocolFeeRecipientUpdated(address indexed previousRecipient, address indexed newRecipient);
+    event RotatorUpdated(address indexed previousRotator, address indexed newRotator, uint64 rotationStart);
+    event LiquidityReleased(
+        address indexed token, address indexed rotator, uint256 launchTokenAmount, uint256 quoteAmount
+    );
+    event CreatorShareReleased(
+        address indexed token, address indexed recipient, uint256 launchTokenAmount, uint256 quoteAmount
+    );
 
     error NotLauncher();
     error NotNFTPositionManager();
@@ -121,6 +137,9 @@ contract HydropumpLocker is
     error RegistryUnset();
     error UnknownFeeUse();
     error InvalidCreatorRecipient();
+    error NotRotator();
+    error NotRotatable();
+    error AlreadyReleased();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -463,6 +482,43 @@ contract HydropumpLocker is
         emit ProtocolSwept(recipient, asset, amount);
     }
 
+    /// @notice Empty every position of `token` and send what comes out to the rotator.
+    /// @dev Pre: caller is `rotator`; the launch was registered after `rotationStart` and not yet released.
+    ///      Eligibility (age, valuation) is the rotator's to check.
+    ///      Post: every position holds zero liquidity and `released[token]` is set. Fees are split first, so
+    ///      the creator's and protocol's shares never mix with principal. The creator's booked share is
+    ///      paid to its recipient where it can be, since its fee use would spend it on a pool about to be
+    ///      emptied. The protocol's launch-token share can no longer be sold and goes out with the
+    ///      principal.
+    function releaseLiquidity(address token)
+        external
+        nonReentrant
+        returns (uint256 launchTokenAmount, uint256 quoteAmount)
+    {
+        address to = rotator;
+        if (msg.sender != to) revert NotRotator();
+        Launch storage launch = _launches[token];
+        address quoteToken = launch.quoteToken;
+        if (launch.pool == address(0)) revert UnknownLaunch();
+        if (launch.createdAt <= rotationStart) revert NotRotatable();
+        if (released[token]) revert AlreadyReleased();
+        released[token] = true;
+
+        _splitRewards(token, fullMask(token));
+        _releaseCreatorShare(token, quoteToken, launch.creatorRecipient);
+
+        (launchTokenAmount, quoteAmount) = _withdraw(token, quoteToken, to);
+
+        uint256 protocolLaunchToken = protocolOwed[token];
+        if (protocolLaunchToken > 0) {
+            protocolOwed[token] = 0;
+            IERC20(token).safeTransfer(to, protocolLaunchToken);
+            launchTokenAmount += protocolLaunchToken;
+        }
+
+        emit LiquidityReleased(token, to, launchTokenAmount, quoteAmount);
+    }
+
     function setCreatorRecipient(address token, address newRecipient) external {
         Launch storage launch = _launches[token];
         if (msg.sender != launch.creatorRecipient) revert NotCreatorRecipient();
@@ -506,6 +562,58 @@ contract HydropumpLocker is
                     recipient: address(this),
                     amount0Max: type(uint128).max,
                     amount1Max: type(uint128).max
+                })
+            );
+            total0 += amount0;
+            total1 += amount1;
+        }
+
+        return token < quoteToken ? (total0, total1) : (total1, total0);
+    }
+
+    /// @dev Best effort per asset: a recipient the token refuses must not block a rotation, so what fails
+    ///      stays booked in `creatorOwed`, reachable once the creator moves their recipient.
+    function _releaseCreatorShare(address token, address quoteToken, address recipient) internal {
+        uint256 launchTokenAmount = _payCreator(token, token, recipient);
+        uint256 quoteAmount = _payCreator(token, quoteToken, recipient);
+        if (launchTokenAmount > 0 || quoteAmount > 0) {
+            emit CreatorShareReleased(token, recipient, launchTokenAmount, quoteAmount);
+        }
+    }
+
+    function _payCreator(address token, address asset, address recipient) internal returns (uint256 paid) {
+        uint256 amount = creatorOwed[token][asset];
+        if (amount == 0) return 0;
+
+        creatorOwed[token][asset] = 0;
+        if (IERC20(asset).trySafeTransfer(recipient, amount)) return amount;
+        creatorOwed[token][asset] = amount;
+    }
+
+    /// @dev Pulls all liquidity and collects it straight to `to`. Fees must already be collected, or
+    ///      they go out with the principal.
+    function _withdraw(address token, address quoteToken, address to)
+        internal
+        returns (uint256 launchTokenAmount, uint256 quoteAmount)
+    {
+        uint256[] storage positionIds = _launches[token].positionIds;
+
+        uint256 total0;
+        uint256 total1;
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            uint256 positionId = positionIds[i];
+            (,,,,,,, uint128 liquidity,,,,) = nonfungiblePositionManager.positions(positionId);
+            if (liquidity == 0) continue;
+
+            // No minimum: the pool is emptied, so a price moved first cannot be moved back to profit.
+            nonfungiblePositionManager.decreaseLiquidity(
+                INonfungiblePositionManager.DecreaseLiquidityParams({
+                    tokenId: positionId, liquidity: liquidity, amount0Min: 0, amount1Min: 0, deadline: block.timestamp
+                })
+            );
+            (uint256 amount0, uint256 amount1) = nonfungiblePositionManager.collect(
+                INonfungiblePositionManager.CollectParams({
+                    tokenId: positionId, recipient: to, amount0Max: type(uint128).max, amount1Max: type(uint128).max
                 })
             );
             total0 += amount0;
@@ -577,5 +685,13 @@ contract HydropumpLocker is
         if (newRecipient == address(0)) revert ZeroAddress();
         emit ProtocolFeeRecipientUpdated(protocolFeeRecipient, newRecipient);
         protocolFeeRecipient = newRecipient;
+    }
+
+    /// @dev The first call fixes `rotationStart`, so every launch made before rotation existed stays
+    ///      locked for good. Zero disables releases; a later rotator keeps the original start.
+    function setRotator(address newRotator) external onlyOwner {
+        if (rotationStart == 0 && newRotator != address(0)) rotationStart = uint64(block.timestamp);
+        emit RotatorUpdated(rotator, newRotator, rotationStart);
+        rotator = newRotator;
     }
 }

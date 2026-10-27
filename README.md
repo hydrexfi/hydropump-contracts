@@ -11,7 +11,7 @@ bribes the Hydropump gauge with it.
 
 ```
 contracts/
-  core/       Launcher, Locker, Token, Buyback, RewardDistributor
+  core/       Launcher, Locker, Token, Rotator, Buyback, RewardDistributor
   helpers/    PairDirectory, FeeUseRegistry, GaugeToken
   feeuses/    the three things a creator's share can become
   interfaces/ libraries/
@@ -22,10 +22,11 @@ contracts/
 | `PairDirectory`        | UUPS        | What is launchable, and what one launch token is worth in each quote. Repriced daily |
 | `HydropumpLauncher`    | UUPS        | Deploys the token, creates the pool, mints the bands, hands them to the locker       |
 | `HydropumpToken`       | no          | Plain immutable ERC20 — burnable, permit, no owner, no mint path, not a proxy        |
-| `HydropumpLocker`      | UUPS        | Holds every launch's positions permanently and splits the fees they earn             |
+| `HydropumpLocker`      | UUPS        | Holds every launch's positions and splits the fees they earn. Releases a dead launch to the rotator |
+| `HydropumpRotator`     | no          | Retires a dead launch into an operator-set target; holders burn the old token for a share |
 | `FeeUseRegistry`       | UUPS        | Which strategy each launch's creator share is spent on. Holds no tokens              |
 | `CreatorBalanceFeeUse` | no          | Creator share is paid straight to the creator's recipient                            |
-| `AutoLpFeeUse`         | no          | Creator share goes back into the launch's own locked curve, permanently              |
+| `AutoLpFeeUse`         | no          | Creator share goes back into the launch's own locked curve                           |
 | `BuybackBurnFeeUse`    | no          | Creator share buys the token in its own pool and burns it                            |
 | `HydropumpBuyback`     | no          | Quote → HYDX via KyberSwap, then bribes the Hydropump gauge                          |
 | `HydropumpGaugeToken`  | no          | Placeholder ERC20 for the pair the Hydropump gauge hangs off                         |
@@ -117,6 +118,37 @@ transfer to it revert.
 Launch pools are deliberately **not gauged**. A gauged Hydrex CL pool runs at `communityFee 1000/1000`,
 sending 100% of swap fees to the community vault and leaving the locked positions earning nothing.
 veHYDX voters are paid from the single Hydropump gauge instead.
+
+## Rotation
+
+A launch that never took off is retired, and its holders moved into a newer launch on the same quote.
+
+**Eligible** when all of these hold, checked by `HydropumpRotator.checkRotatable(token)`, which reverts
+with the reason:
+
+- registered **after** the locker's `rotationStart`, which is fixed when its rotator is first set. Every
+  launch made before that stays locked for good.
+- at least **7 days** old.
+- **under $20k market cap for every hour of the last 24**: four times the $5k open, measured from the
+  pool's oracle (hourly averages, not spot) against today's directory start tick, and scaled by the
+  supply still in existence. A launch on a quote the directory has disabled is not rotatable.
+
+**`rotate(token)`** is permissionless and pays the caller nothing. The locker splits the fees as usual,
+pays the creator's booked share straight to their recipient, then empties every band and hands the
+principal to the rotator. The unsold supply is burnt, and **all** of the quote buys the **target** the
+operator set for that quote token (`setTargets`) in one swap. That swap may lift the target up to 25% past
+its average over the last hour; if spending everything would take more, the whole rotation reverts and the
+launch waits. On this curve 25% is about 3% of the target's market cap, so pick targets well past their
+open: a dead pool near the $20k cap holds roughly $2.5k of quote, which wants a target around $80k+.
+
+**`redeem(token, amount)`** burns the old token (approve the rotator, or permit) and pays
+`amount / totalSupply` of the target the rotation bought. Redemptions are open forever and the order does
+not matter. Together the holders get about what selling the whole float back into the pool would have
+raised, less the one buy's slippage, split by tokens held rather than by who sold first.
+
+The target must be a live Hydropump launch on the same quote and past its 10-block launch tax. A rotation
+keeps the target it was made with. The released positions stay in the locker, empty; the launch's fee calls
+keep working and return nothing.
 
 ## Fees
 
@@ -222,6 +254,10 @@ Four identities:
 
 The locker and registry go to the admin, and the directory to the operator, as `Ownable2Step` transfers:
 each has to call `acceptOwnership()` afterwards.
+
+**Rotation** is turned on after the core deploy: `forge script script/deploy/DeployRotator.s.sol` (owner
+`HYDROPUMP_OWNER`, operator `HYDROPUMP_OPERATOR`), then from the locker owner, the locker upgrade and
+`setRotator(rotator)`. The operator sets targets with `setTargets`.
 
 Live roles: admin `0x74266f2b206D1359B83fc74949EF07176FB3AE03`, owner
 `0x1aE3753d9b60743A89159CcFF8E251C60B560311`, operator `0x1681b1d40AB2fb81F8a1dd28b56baFfbB869a214`.

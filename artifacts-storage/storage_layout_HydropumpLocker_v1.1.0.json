@@ -1,0 +1,260 @@
+{
+  "storage": [
+    {
+      "astId": 86,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "launcher",
+      "offset": 0,
+      "slot": "0",
+      "type": "t_address"
+    },
+    {
+      "astId": 88,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "creatorFee",
+      "offset": 20,
+      "slot": "0",
+      "type": "t_uint64"
+    },
+    {
+      "astId": 90,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "feeUseRegistry",
+      "offset": 0,
+      "slot": "1",
+      "type": "t_address"
+    },
+    {
+      "astId": 92,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "protocolFee",
+      "offset": 20,
+      "slot": "1",
+      "type": "t_uint64"
+    },
+    {
+      "astId": 94,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "protocolFeeRecipient",
+      "offset": 0,
+      "slot": "2",
+      "type": "t_address"
+    },
+    {
+      "astId": 99,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "_launches",
+      "offset": 0,
+      "slot": "3",
+      "type": "t_mapping(t_address,t_struct(Launch)84_storage)"
+    },
+    {
+      "astId": 104,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "protocolOwed",
+      "offset": 0,
+      "slot": "4",
+      "type": "t_mapping(t_address,t_uint256)"
+    },
+    {
+      "astId": 110,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "lifetimeFees",
+      "offset": 0,
+      "slot": "5",
+      "type": "t_mapping(t_address,t_struct(FeeTotals)70_storage)"
+    },
+    {
+      "astId": 117,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "creatorOwed",
+      "offset": 0,
+      "slot": "6",
+      "type": "t_mapping(t_address,t_mapping(t_address,t_uint256))"
+    },
+    {
+      "astId": 120,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "rotator",
+      "offset": 0,
+      "slot": "7",
+      "type": "t_address"
+    },
+    {
+      "astId": 123,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "rotationStart",
+      "offset": 20,
+      "slot": "7",
+      "type": "t_uint64"
+    },
+    {
+      "astId": 128,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "released",
+      "offset": 0,
+      "slot": "8",
+      "type": "t_mapping(t_address,t_bool)"
+    },
+    {
+      "astId": 133,
+      "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+      "label": "__gap",
+      "offset": 0,
+      "slot": "9",
+      "type": "t_array(t_uint256)39_storage"
+    }
+  ],
+  "types": {
+    "t_address": {
+      "encoding": "inplace",
+      "label": "address",
+      "numberOfBytes": "20"
+    },
+    "t_array(t_uint256)39_storage": {
+      "encoding": "inplace",
+      "label": "uint256[39]",
+      "numberOfBytes": "1248",
+      "base": "t_uint256"
+    },
+    "t_array(t_uint256)dyn_storage": {
+      "encoding": "dynamic_array",
+      "label": "uint256[]",
+      "numberOfBytes": "32",
+      "base": "t_uint256"
+    },
+    "t_bool": {
+      "encoding": "inplace",
+      "label": "bool",
+      "numberOfBytes": "1"
+    },
+    "t_mapping(t_address,t_bool)": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => bool)",
+      "numberOfBytes": "32",
+      "value": "t_bool"
+    },
+    "t_mapping(t_address,t_mapping(t_address,t_uint256))": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => mapping(address => uint256))",
+      "numberOfBytes": "32",
+      "value": "t_mapping(t_address,t_uint256)"
+    },
+    "t_mapping(t_address,t_struct(FeeTotals)70_storage)": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => struct HydropumpLocker.FeeTotals)",
+      "numberOfBytes": "32",
+      "value": "t_struct(FeeTotals)70_storage"
+    },
+    "t_mapping(t_address,t_struct(Launch)84_storage)": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => struct HydropumpLocker.Launch)",
+      "numberOfBytes": "32",
+      "value": "t_struct(Launch)84_storage"
+    },
+    "t_mapping(t_address,t_uint256)": {
+      "encoding": "mapping",
+      "key": "t_address",
+      "label": "mapping(address => uint256)",
+      "numberOfBytes": "32",
+      "value": "t_uint256"
+    },
+    "t_struct(FeeTotals)70_storage": {
+      "encoding": "inplace",
+      "label": "struct HydropumpLocker.FeeTotals",
+      "numberOfBytes": "32",
+      "members": [
+        {
+          "astId": 67,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "launchToken",
+          "offset": 0,
+          "slot": "0",
+          "type": "t_uint128"
+        },
+        {
+          "astId": 69,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "quote",
+          "offset": 16,
+          "slot": "0",
+          "type": "t_uint128"
+        }
+      ]
+    },
+    "t_struct(Launch)84_storage": {
+      "encoding": "inplace",
+      "label": "struct HydropumpLocker.Launch",
+      "numberOfBytes": "160",
+      "members": [
+        {
+          "astId": 72,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "quoteToken",
+          "offset": 0,
+          "slot": "0",
+          "type": "t_address"
+        },
+        {
+          "astId": 74,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "pool",
+          "offset": 0,
+          "slot": "1",
+          "type": "t_address"
+        },
+        {
+          "astId": 76,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "creator",
+          "offset": 0,
+          "slot": "2",
+          "type": "t_address"
+        },
+        {
+          "astId": 78,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "creatorRecipient",
+          "offset": 0,
+          "slot": "3",
+          "type": "t_address"
+        },
+        {
+          "astId": 80,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "createdAt",
+          "offset": 20,
+          "slot": "3",
+          "type": "t_uint64"
+        },
+        {
+          "astId": 83,
+          "contract": "contracts/core/HydropumpLocker.sol:HydropumpLocker",
+          "label": "positionIds",
+          "offset": 0,
+          "slot": "4",
+          "type": "t_array(t_uint256)dyn_storage"
+        }
+      ]
+    },
+    "t_uint128": {
+      "encoding": "inplace",
+      "label": "uint128",
+      "numberOfBytes": "16"
+    },
+    "t_uint256": {
+      "encoding": "inplace",
+      "label": "uint256",
+      "numberOfBytes": "32"
+    },
+    "t_uint64": {
+      "encoding": "inplace",
+      "label": "uint64",
+      "numberOfBytes": "8"
+    }
+  }
+}

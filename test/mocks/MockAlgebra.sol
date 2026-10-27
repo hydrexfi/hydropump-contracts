@@ -52,6 +52,12 @@ contract MockAlgebraPool {
     address public plugin = address(this);
     uint16 public pluginConfig = 1; // BEFORE_SWAP_FLAG
 
+    /// @dev Price history for `getTimepoints`: spot throughout, except `spikeTick` between `spikeFrom`
+    ///      and `spikeTo` seconds ago. With no spike set, history is spot all the way back.
+    int24 public spikeTick;
+    uint32 public spikeFrom;
+    uint32 public spikeTo;
+
     function init(address _token0, address _token1, int24 _tickSpacing, uint160 _price) external {
         (token0, token1, tickSpacing, price) = (_token0, _token1, _tickSpacing, _price);
     }
@@ -69,6 +75,31 @@ contract MockAlgebraPool {
         lastTimepointTimestamp = uint32(block.timestamp);
         _timepointTick = MockTickMath.tickAtSqrtRatio(price);
         timepointIndex++;
+    }
+
+    function setSpike(int24 _tick, uint32 _from, uint32 _to) external {
+        (spikeTick, spikeFrom, spikeTo) = (_tick, _from, _to);
+    }
+
+    /// @dev Cumulatives taken relative to now, so only their differences mean anything — which is all
+    ///      any reader of a real oracle may use either.
+    function getTimepoints(uint32[] calldata secondsAgos)
+        external
+        view
+        returns (int56[] memory tickCumulatives, uint88[] memory volatilityCumulatives)
+    {
+        int56 spot = MockTickMath.tickAtSqrtRatio(price);
+        tickCumulatives = new int56[](secondsAgos.length);
+        volatilityCumulatives = new uint88[](secondsAgos.length);
+        for (uint256 i = 0; i < secondsAgos.length; i++) {
+            uint32 ago = secondsAgos[i];
+            uint32 spiked = _min(ago, spikeFrom) - _min(ago, spikeTo);
+            tickCumulatives[i] = -(int56(uint56(ago)) * spot + int56(uint56(spiked)) * (spikeTick - spot));
+        }
+    }
+
+    function _min(uint32 a, uint32 b) internal pure returns (uint32) {
+        return a < b ? a : b;
     }
 
     function timepoints(uint256) external view returns (bool, uint32, int56, uint88, int24, int24, uint16) {
@@ -109,6 +140,9 @@ contract MockAlgebra {
         address owner;
         uint128 owed0;
         uint128 owed1;
+        // What a full withdrawal returns. Set at deposit; tests that simulate trading rewrite it.
+        uint256 principal0;
+        uint256 principal1;
     }
 
     /// @notice Spacing given to every pool this mock creates. Tests vary it to prove the curve aligns.
@@ -208,7 +242,9 @@ contract MockAlgebra {
             liquidity: liquidity,
             owner: params.recipient,
             owed0: 0,
-            owed1: 0
+            owed1: 0,
+            principal0: amount0 - phantom0,
+            principal1: amount1 - phantom1
         });
     }
 
@@ -237,6 +273,42 @@ contract MockAlgebra {
 
         liquidity = uint128((amount0 + amount1) >> 32);
         position.liquidity += liquidity;
+        position.principal0 += amount0;
+        position.principal1 += amount1;
+    }
+
+    function principalOf(uint256 tokenId) external view returns (uint256, uint256) {
+        return (_positions[tokenId].principal0, _positions[tokenId].principal1);
+    }
+
+    /// @notice The amounts a full withdrawal of `tokenId` will return, standing in for the trades that
+    ///         would have moved them. The pool must hold them.
+    function setPrincipal(uint256 tokenId, uint256 principal0, uint256 principal1) external {
+        Position storage position = _positions[tokenId];
+        (position.principal0, position.principal1) = (principal0, principal1);
+    }
+
+    /// @dev Pro rata over the position's principal, moved from the pool to here and owed, as the real
+    ///      manager does.
+    function decreaseLiquidity(INonfungiblePositionManager.DecreaseLiquidityParams calldata params)
+        external
+        returns (uint256 amount0, uint256 amount1)
+    {
+        Position storage position = _positions[params.tokenId];
+        require(msg.sender == position.owner, "not owner");
+        if (params.liquidity == 0 || params.liquidity > position.liquidity) revert ZeroLiquidity();
+
+        amount0 = position.principal0 * params.liquidity / position.liquidity;
+        amount1 = position.principal1 * params.liquidity / position.liquidity;
+        position.principal0 -= amount0;
+        position.principal1 -= amount1;
+        position.liquidity -= params.liquidity;
+
+        address pool = poolFor(position.token0, position.token1);
+        if (amount0 > 0) MockAlgebraPool(pool).pay(position.token0, address(this), amount0);
+        if (amount1 > 0) MockAlgebraPool(pool).pay(position.token1, address(this), amount1);
+        position.owed0 += uint128(amount0);
+        position.owed1 += uint128(amount1);
     }
 
     function setOwed(uint256 tokenId, uint128 owed0, uint128 owed1) external {
