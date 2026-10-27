@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {console2} from "forge-std/console2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {HydropumpLocker} from "../../contracts/core/HydropumpLocker.sol";
@@ -50,11 +49,11 @@ contract RotationForkTest is ForkFixture {
         vm.warp(vm.getBlockTimestamp() + seconds_);
     }
 
-    function _redeemAll(address who, address dead) internal returns (uint256 targetOut, uint256 quoteOut) {
+    function _redeemAll(address who, address dead) internal returns (uint256 targetOut) {
         uint256 held = IERC20(dead).balanceOf(who);
         vm.startPrank(who);
         IERC20(dead).approve(address(rotator), held);
-        (targetOut, quoteOut) = rotator.redeem(dead, held);
+        targetOut = rotator.redeem(dead, held);
         vm.stopPrank();
     }
 
@@ -66,7 +65,9 @@ contract RotationForkTest is ForkFixture {
 
         (address target,,,) = _launchOnSide(WETH, !deadIsToken0, bytes32(0));
         _passLaunchWindow();
-        _swapIn(poker, WETH, target, 0.05 ether);
+        // One buy may move the target at most 25%, about 3% of its market cap on this curve, so the
+        // target has to be well past its open to take a whole dead pool in one go.
+        _swapIn(poker, WETH, target, 1 ether);
         _setTarget(target);
 
         _nextBlock(7 days);
@@ -74,7 +75,7 @@ contract RotationForkTest is ForkFixture {
 
         uint256 poolWeth = IERC20(WETH).balanceOf(deadPool);
         vm.prank(makeAddr("anyone"));
-        rotator.rotate(dead);
+        (uint256 quoteSpent, uint256 bought) = rotator.rotate(dead);
 
         for (uint256 i = 0; i < ids.length; i++) {
             (,,,,,,, uint128 liquidity,,,,) = NPM.positions(ids[i]);
@@ -84,30 +85,23 @@ contract RotationForkTest is ForkFixture {
         assertLt(IERC20(dead).balanceOf(deadPool), 1e9, "unsold supply out of the pool");
         assertLt(IERC20(WETH).balanceOf(deadPool), poolWeth / 1_000, "and the quote with it");
 
-        // Each buy stops 5% past the target's last-hour average. With nobody selling in between, the rest
-        // fills as that average catches up, an hour at a time.
-        (,,, uint256 quoteHeld) = rotator.rotations(dead);
-        uint256 hoursTaken;
-        for (; hoursTaken < 72 && quoteHeld > 0; hoursTaken++) {
-            _nextBlock(1 hours);
-            rotator.buy(dead);
-            (,,, quoteHeld) = rotator.rotations(dead);
-        }
-        console2.log("hours to spend the quote", hoursTaken);
-        (,, uint256 targetHeld, uint256 quoteLeft) = rotator.rotations(dead);
-        assertEq(quoteLeft, 0, "every wei of quote eventually spent");
-        assertGt(targetHeld, 0);
+        // One buy, all of it.
+        assertGt(quoteSpent, poolWeth * 999 / 1_000, "the released quote, all spent");
+        assertEq(IERC20(WETH).balanceOf(address(rotator)), 0, "none left over");
+        (, uint256 targetHeld) = rotator.rotations(dead);
+        assertEq(targetHeld, bought);
+        assertGt(bought, 0);
 
         // Pro rata by tokens held, not quote paid: bob bought later and higher, as a sale into the curve
         // would also have priced him.
         uint256 supply = IERC20(dead).totalSupply();
         uint256 aliceShare = IERC20(dead).balanceOf(alice);
         uint256 bobShare = IERC20(dead).balanceOf(bob);
-        (uint256 aliceOut,) = _redeemAll(alice, dead);
+        uint256 aliceOut = _redeemAll(alice, dead);
         assertEq(aliceOut, targetHeld * aliceShare / supply, "pro rata");
         assertEq(IERC20(target).balanceOf(alice), aliceOut);
 
-        (uint256 bobOut,) = _redeemAll(bob, dead);
+        uint256 bobOut = _redeemAll(bob, dead);
         assertApproxEqAbs(bobOut, targetHeld * bobShare / supply, 1, "the second redeemer is not diluted");
         assertLt(poolWeth, 0.08 ether, "pool held what they paid, less fees");
     }
@@ -154,8 +148,8 @@ contract RotationForkTest is ForkFixture {
         _aboveTheCapInTheLastDayBlocksRotation(false);
     }
 
-    /// A target pumped at the end of one block opens the next one high. The buy holds to the target's
-    /// last-hour average instead, so nothing is spent until the price comes back.
+    /// A target pumped just before the rotation leaves the one buy no room under its 25% cap over the
+    /// last-hour average, so the rotation reverts and waits for the price to come back.
     function test_ATargetPumpedInTheBlockBeforeIsNotBoughtHigh() public onlyForked {
         (address dead,,,) = _launchOnSide(WETH, true, bytes32(0));
         _passLaunchWindow();
@@ -169,15 +163,15 @@ contract RotationForkTest is ForkFixture {
         int24 fair = _currentTick(targetPool);
         uint256 pumped = _swapIn(bob, WETH, target, 0.5 ether);
         int24 moved = _currentTick(targetPool) - fair;
-        assertGt(moved < 0 ? -moved : moved, 1_000, "pumped well past the 5% buffer");
+        assertGt(moved < 0 ? -moved : moved, 2_231, "pumped past the 25% cap");
         _nextBlock(2);
 
-        (uint256 spent,) = rotator.rotate(dead);
-        assertEq(spent, 0, "nothing bought at the pumped open");
+        vm.expectRevert(HydropumpRotator.SlippageTooHigh.selector);
+        rotator.rotate(dead);
 
         _sell(bob, target, WETH, pumped);
         _nextBlock(2);
-        (spent,) = rotator.buy(dead);
+        (uint256 spent,) = rotator.rotate(dead);
         assertGt(spent, 0, "bought once the price is back");
     }
 

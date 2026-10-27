@@ -346,22 +346,32 @@ contract HydropumpRotatorTest is HydropumpFixture {
         assertEq(quoteSpent, poolQuote, "every wei of quote spent on the target");
         assertGt(bought, 0);
 
-        (address storedTarget, address storedQuote, uint256 targetHeld, uint256 quoteHeld) = rotator.rotations(dead);
+        (address storedTarget, uint256 targetHeld) = rotator.rotations(dead);
         assertEq(storedTarget, target);
-        assertEq(storedQuote, _quote());
         assertEq(targetHeld, bought);
-        assertEq(quoteHeld, 0);
         assertEq(IERC20(target).balanceOf(address(rotator)), bought);
+        assertEq(IERC20(_quote()).balanceOf(address(rotator)), 0, "no quote left behind");
         assertEq(IERC20(_quote()).balanceOf(stranger), 0, "no bounty");
 
         vm.expectRevert(HydropumpRotator.AlreadyRotated.selector);
         rotator.rotate(dead);
     }
 
+    /// One buy spends it all, even one that moves the target about 22%, inside the 25% cap.
+    function test_ABuyWithinTheCapSpendsAllTheQuoteInOneGo() public {
+        (address dead,) = _deadWithHolders();
+        uint256 poolQuote = IERC20(_quote()).balanceOf(locker.poolOf(dead));
+        router.configure(3_000, 2_000);
+
+        (uint256 quoteSpent, uint256 bought) = rotator.rotate(dead);
+        assertEq(quoteSpent, poolQuote, "all of it, in one buy");
+        assertGt(bought, 0);
+    }
+
     function test_RedemptionIsProRataWhateverTheOrder() public {
         (address dead, address target) = _deadWithHolders();
         rotator.rotate(dead);
-        (,, uint256 targetHeld,) = rotator.rotations(dead);
+        (, uint256 targetHeld) = rotator.rotations(dead);
 
         uint256 aliceHeld = IERC20(dead).balanceOf(alice);
         uint256 bobHeld = IERC20(dead).balanceOf(bob);
@@ -369,12 +379,12 @@ contract HydropumpRotatorTest is HydropumpFixture {
 
         vm.startPrank(bob);
         IERC20(dead).approve(address(rotator), bobHeld);
-        (uint256 bobOut,) = rotator.redeem(dead, bobHeld);
+        uint256 bobOut = rotator.redeem(dead, bobHeld);
         vm.stopPrank();
 
         vm.startPrank(alice);
         IERC20(dead).approve(address(rotator), aliceHeld);
-        (uint256 aliceOut,) = rotator.redeem(dead, aliceHeld);
+        uint256 aliceOut = rotator.redeem(dead, aliceHeld);
         vm.stopPrank();
 
         assertEq(bobOut, targetHeld * bobHeld / supply);
@@ -398,73 +408,43 @@ contract HydropumpRotatorTest is HydropumpFixture {
         rotator.redeem(dead, 1);
     }
 
-    /// One block's price limit can leave quote unspent. Redeeming meanwhile pays a share of it, and
-    /// anyone can spend the rest in a later block.
-    function test_UnfilledQuoteIsRedeemableAndCanBeBoughtLater() public {
-        (address dead, address target) = _deadWithHolders();
-        router.configure(3_000, 1_026); // twice the limit's 513 ticks, so half the buy fills
+    /// A buy that would have to run past 25% over the target's average reverts the whole rotation, so
+    /// nothing is released and the launch can be rotated later.
+    function test_ABuyPastTheCapRevertsTheWholeRotation() public {
+        (address dead,) = _deadWithHolders();
+        router.configure(3_000, 3_000); // the one buy would need 3,000 ticks; the cap is 2,231
 
+        vm.expectRevert(HydropumpRotator.SlippageTooHigh.selector);
         rotator.rotate(dead);
-        (,, uint256 targetHeld, uint256 quoteHeld) = rotator.rotations(dead);
-        assertGt(quoteHeld, 0, "some quote left over");
-        assertGt(targetHeld, 0);
-
-        uint256 aliceHeld = IERC20(dead).balanceOf(alice);
-        uint256 supply = IERC20(dead).totalSupply();
-        vm.startPrank(alice);
-        IERC20(dead).approve(address(rotator), aliceHeld);
-        (uint256 targetOut, uint256 quoteOut) = rotator.redeem(dead, aliceHeld);
-        vm.stopPrank();
-        assertEq(targetOut, targetHeld * aliceHeld / supply);
-        assertEq(quoteOut, quoteHeld * aliceHeld / supply);
-
-        vm.roll(vm.getBlockNumber() + 1);
-        vm.warp(vm.getBlockTimestamp() + 2);
-        (uint256 spent, uint256 bought) = rotator.buy(dead);
-        assertGt(spent, 0);
-        assertGt(bought, 0);
-        (,, uint256 targetAfter, uint256 quoteAfter) = rotator.rotations(dead);
-        assertEq(quoteAfter, quoteHeld - quoteOut - spent);
-        assertEq(targetAfter, targetHeld - targetOut + bought);
-        assertEq(IERC20(target).balanceOf(address(rotator)), targetAfter);
+        assertFalse(locker.released(dead), "nothing released");
+        assertTrue(rotator.isRotatable(dead), "still waiting to rotate");
     }
 
-    /// A target pumped in an earlier block opens this one high, so the block-open limit alone would buy
-    /// at the pumped price. The buy is also held to within 5% of the target's last-hour average.
-    function test_TargetPumpedInAnEarlierBlockIsNotBoughtHigh() public {
+    /// A target pumped just before the rotation starts the buy past its last-hour average. Pumped past
+    /// the cap, the rotation waits; back near the average, it goes through.
+    function test_TargetPumpedPastTheCapIsNotBought() public {
         (address dead, address target) = _deadWithHolders();
         address targetPool = locker.poolOf(target);
         int24 fair = _currentTick(targetPool);
         _setSpot(targetPool, fair + _launchPriceOffset(target, 5_000));
         MockAlgebraPool(targetPool).setSpike(fair, 1 hours, 0);
 
-        (uint256 spent,) = rotator.rotate(dead);
-        assertEq(spent, 0, "nothing bought 5,000 ticks over the average");
-        (,,, uint256 quoteHeld) = rotator.rotations(dead);
-        assertGt(quoteHeld, 0, "the quote waits for a fair price");
+        vm.expectRevert(HydropumpRotator.SlippageTooHigh.selector);
+        rotator.rotate(dead);
 
-        // Back near the average, the same quote buys.
         _setSpot(targetPool, fair);
-        vm.roll(vm.getBlockNumber() + 1);
-        (spent,) = rotator.buy(dead);
+        (uint256 spent,) = rotator.rotate(dead);
         assertGt(spent, 0);
     }
 
-    /// A target that is itself rotated away leaves the quote in place rather than buying into an empty pool.
-    function test_BuyStopsOnceTheTargetIsRotated() public {
+    /// A target rotated away since it was set has no pool left to buy from.
+    function test_ARotatedTargetIsRefused() public {
         (address dead, address target) = _deadWithHolders();
-        router.configure(3_000, 1_026);
-        rotator.rotate(dead);
-        (,,, uint256 quoteHeld) = rotator.rotations(dead);
-
-        _syncPrincipal(target);
         vm.prank(address(rotator));
         locker.releaseLiquidity(target);
 
-        (uint256 spent,) = rotator.buy(dead);
-        assertEq(spent, 0);
-        (,,, uint256 quoteAfter) = rotator.rotations(dead);
-        assertEq(quoteAfter, quoteHeld);
+        vm.expectRevert(HydropumpRotator.InvalidTarget.selector);
+        rotator.rotate(dead);
     }
 }
 

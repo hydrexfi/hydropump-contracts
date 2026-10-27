@@ -135,16 +135,16 @@ with the reason:
 
 **`rotate(token)`** is permissionless and pays the caller nothing. The locker splits the fees as usual,
 pays the creator's booked share straight to their recipient, then empties every band and hands the
-principal to the rotator. The unsold supply is burnt, and the quote buys the **target** the operator set
-for that quote token (`setTargets`). The buy stops 5% past the block's open (`SwapPriceLimit`, as the fee
-uses buy) and 5% past the target's average over the last hour, so a target pumped in the block before is
-not bought high. What does not fill stays as quote; anyone can call **`buy(token)`** later to spend more.
-Into a thin target with nobody selling, that fills over a few hours as the average catches up.
+principal to the rotator. The unsold supply is burnt, and **all** of the quote buys the **target** the
+operator set for that quote token (`setTargets`) in one swap. That swap may lift the target up to 25% past
+its average over the last hour; if spending everything would take more, the whole rotation reverts and the
+launch waits. On this curve 25% is about 3% of the target's market cap, so pick targets well past their
+open: a dead pool near the $20k cap holds roughly $2.5k of quote, which wants a target around $80k+.
 
 **`redeem(token, amount)`** burns the old token (approve the rotator, or permit) and pays
-`amount / totalSupply` of what the rotation holds — the target and any quote not yet spent. Redemptions are
-open forever and the order does not matter. Together the holders get about what selling the whole float back
-into the pool would have raised, split by tokens held rather than by who sold first.
+`amount / totalSupply` of the target the rotation bought. Redemptions are open forever and the order does
+not matter. Together the holders get about what selling the whole float back into the pool would have
+raised, less the one buy's slippage, split by tokens held rather than by who sold first.
 
 The target must be a live Hydropump launch on the same quote and past its 10-block launch tax. A rotation
 keeps the target it was made with. The released positions stay in the locker, empty; the launch's fee calls

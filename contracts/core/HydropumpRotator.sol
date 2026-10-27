@@ -16,17 +16,16 @@ import {IAlgebraPool} from "../interfaces/IAlgebraPool.sol";
 import {IPairDirectory} from "../interfaces/IPairDirectory.sol";
 import {ISwapRouter} from "../interfaces/ISwapRouter.sol";
 import {HydropumpAddresses} from "../libraries/HydropumpAddresses.sol";
-import {SwapPriceLimit} from "../libraries/SwapPriceLimit.sol";
 import {TickMath} from "../libraries/TickMath.sol";
 
 /// @title HydropumpRotator
 /// @notice Retires a launch that never took off and moves its holders into the target the operator has
 ///         set for its quote token. Anyone can rotate an eligible launch. Its liquidity is pulled, the
-///         unsold supply burnt and the quote spent on the target. Holders then burn the old token here for
-///         a pro-rata share of what the rotation holds, whenever they like.
-/// @dev Invariant: a rotation's `targetHeld` and `quoteHeld` belong to the dead token's outstanding supply,
-///      so each token redeemed takes `amount / totalSupply` of both. Burning on redeem keeps the ratio fair
-///      to everyone who has not redeemed yet, whatever the order.
+///         unsold supply burnt and all of the quote spent on the target in one buy. Holders then burn the
+///         old token here for a pro-rata share of the target, whenever they like.
+/// @dev Invariant: a rotation's `targetHeld` belongs to the dead token's outstanding supply, so each token
+///      redeemed takes `amount / totalSupply` of it. Burning on redeem keeps the ratio fair to everyone who
+///      has not redeemed yet, whatever the order.
 contract HydropumpRotator is Ownable2Step, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
@@ -38,9 +37,11 @@ contract HydropumpRotator is Ownable2Step, ReentrancyGuardTransient {
     uint32 public constant HOLD_STEP = 1 hours;
     /// @notice Market cap cap as a multiple of the opening valuation: $20k on the $5k every launch opens at.
     uint256 public constant MAX_OPEN_MULTIPLE = 4;
-    /// @notice The target buy also stops `SwapPriceLimit.BUFFER_TICKS` past the target's average over this
-    ///         window, so a target pumped in an earlier block, which sets this block's open, is not bought high.
+    /// @notice The buy may end at most `MAX_SLIPPAGE_TICKS` past the target's average over this window.
     uint32 public constant TARGET_AVERAGE_WINDOW = 1 hours;
+    /// @notice 1.0001^2231 ≈ 1.25: the one buy may lift the target up to 25% past its last-hour average.
+    ///         A rotation that needs more reverts whole, so a pump just before it only eats this headroom.
+    int24 public constant MAX_SLIPPAGE_TICKS = 2_231;
     /// @notice `HydropumpLauncher.SUPPLY`, which the open valuation is measured on.
     uint256 public constant LAUNCH_SUPPLY = 10_000_000_000e18;
 
@@ -48,9 +49,7 @@ contract HydropumpRotator is Ownable2Step, ReentrancyGuardTransient {
 
     struct Rotation {
         address target;
-        address quoteToken;
         uint256 targetHeld;
-        uint256 quoteHeld;
     }
 
     /// @notice Sets each quote's target. Held apart from the owner, like the directory's daily key.
@@ -62,10 +61,14 @@ contract HydropumpRotator is Ownable2Step, ReentrancyGuardTransient {
     event OperatorUpdated(address indexed previousOperator, address indexed newOperator);
     event TargetUpdated(address indexed quoteToken, address indexed previousTarget, address indexed newTarget);
     event Rotated(
-        address indexed dead, address indexed target, address indexed caller, uint256 burned, uint256 quoteReleased
+        address indexed dead,
+        address indexed target,
+        address indexed caller,
+        uint256 burned,
+        uint256 quoteSpent,
+        uint256 bought
     );
-    event TargetBought(address indexed dead, address indexed target, uint256 quoteSpent, uint256 bought);
-    event Redeemed(address indexed dead, address indexed holder, uint256 amount, uint256 targetOut, uint256 quoteOut);
+    event Redeemed(address indexed dead, address indexed holder, uint256 amount, uint256 targetOut);
 
     error NotOperator();
     error ZeroAddress();
@@ -79,6 +82,7 @@ contract HydropumpRotator is Ownable2Step, ReentrancyGuardTransient {
     error InvalidTarget();
     error NotRotated();
     error ZeroAmount();
+    error SlippageTooHigh();
 
     /*//////////////////////////////////////////////////////////////
                                 SETUP
@@ -123,13 +127,12 @@ contract HydropumpRotator is Ownable2Step, ReentrancyGuardTransient {
     }
 
     /// @notice What redeeming `amount` of `dead` pays right now.
-    function previewRedeem(address dead, uint256 amount) public view returns (uint256 targetOut, uint256 quoteOut) {
+    function previewRedeem(address dead, uint256 amount) public view returns (uint256 targetOut) {
         Rotation storage rotation = rotations[dead];
         if (rotation.target == address(0)) revert NotRotated();
         uint256 supply = IERC20(dead).totalSupply();
-        if (amount == 0 || supply == 0) return (0, 0);
+        if (amount == 0 || supply == 0) return 0;
         targetOut = Math.mulDiv(rotation.targetHeld, amount, supply);
-        quoteOut = Math.mulDiv(rotation.quoteHeld, amount, supply);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -137,8 +140,9 @@ contract HydropumpRotator is Ownable2Step, ReentrancyGuardTransient {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Retire `dead` into its quote's current target. Permissionless; nothing is paid to the caller.
-    /// @dev Post: `dead`'s positions are empty, its unsold supply is burnt, and `rotations[dead]` holds the
-    ///      released quote less whatever `SwapPriceLimit` let this block spend on the target.
+    /// @dev Post: `dead`'s positions are empty, its unsold supply is burnt, and every wei of quote released
+    ///      has bought the target in one swap that ended within `MAX_SLIPPAGE_TICKS` of the target's
+    ///      last-hour average. If one swap cannot spend it all inside that, the whole call reverts.
     function rotate(address dead) external nonReentrant returns (uint256 quoteSpent, uint256 bought) {
         checkRotatable(dead);
 
@@ -158,33 +162,24 @@ contract HydropumpRotator is Ownable2Step, ReentrancyGuardTransient {
         uint256 quoteReleased = IERC20(quoteToken).balanceOf(address(this)) - heldQuote;
 
         if (burned > 0) ERC20Burnable(dead).burn(burned);
-        rotations[dead] = Rotation({target: target, quoteToken: quoteToken, targetHeld: 0, quoteHeld: quoteReleased});
-        emit Rotated(dead, target, msg.sender, burned, quoteReleased);
+        if (quoteReleased > 0) (quoteSpent, bought) = _buy(target, quoteToken, quoteReleased);
 
-        return _buy(dead);
+        rotations[dead] = Rotation({target: target, targetHeld: bought});
+        emit Rotated(dead, target, msg.sender, burned, quoteSpent, bought);
     }
 
-    /// @notice Spend more of a rotation's quote on its target, within this block's `SwapPriceLimit`.
-    ///         Permissionless, for when one block could not fill it all.
-    function buy(address dead) external nonReentrant returns (uint256 quoteSpent, uint256 bought) {
-        if (rotations[dead].target == address(0)) revert NotRotated();
-        return _buy(dead);
-    }
-
-    /// @notice Burn `amount` of a rotated token for its share of the target and any unspent quote.
+    /// @notice Burn `amount` of a rotated token for its share of the target.
     /// @dev Needs an allowance of `amount` (or a permit): the burn goes through `burnFrom`.
-    function redeem(address dead, uint256 amount) external nonReentrant returns (uint256 targetOut, uint256 quoteOut) {
+    function redeem(address dead, uint256 amount) external nonReentrant returns (uint256 targetOut) {
         if (amount == 0) revert ZeroAmount();
-        (targetOut, quoteOut) = previewRedeem(dead, amount);
+        targetOut = previewRedeem(dead, amount);
 
         Rotation storage rotation = rotations[dead];
         rotation.targetHeld -= targetOut;
-        rotation.quoteHeld -= quoteOut;
         ERC20Burnable(dead).burnFrom(msg.sender, amount);
 
         if (targetOut > 0) IERC20(rotation.target).safeTransfer(msg.sender, targetOut);
-        if (quoteOut > 0) IERC20(rotation.quoteToken).safeTransfer(msg.sender, quoteOut);
-        emit Redeemed(dead, msg.sender, amount, targetOut, quoteOut);
+        emit Redeemed(dead, msg.sender, amount, targetOut);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -224,20 +219,12 @@ contract HydropumpRotator is Ownable2Step, ReentrancyGuardTransient {
         return Math.mulDiv(ratioX96, supply, LAUNCH_SUPPLY) < MAX_OPEN_MULTIPLE << 96;
     }
 
-    function _buy(address dead) internal returns (uint256 quoteSpent, uint256 bought) {
-        Rotation storage rotation = rotations[dead];
-        (address target, address quoteToken, uint256 amount) =
-            (rotation.target, rotation.quoteToken, rotation.quoteHeld);
-        // A target rotated out since has no pool to buy from; the quote stays redeemable instead.
-        if (amount == 0 || locker.released(target)) return (0, 0);
-
-        address pool = locker.poolOf(target);
-        bool zeroToOne = quoteToken < target;
-        (uint160 limitSqrtPrice, bool room) = SwapPriceLimit.get(pool, zeroToOne);
-        if (!room) return (0, 0);
-        (limitSqrtPrice, room) = _withinAverage(pool, zeroToOne, limitSqrtPrice);
-        if (!room) return (0, 0);
-
+    /// @dev All or nothing: the swap stops at the slippage limit, so anything left unspent means the limit
+    ///      was hit and the rotation reverts.
+    function _buy(address target, address quoteToken, uint256 amount)
+        internal
+        returns (uint256 quoteSpent, uint256 bought)
+    {
         uint256 heldQuote = IERC20(quoteToken).balanceOf(address(this));
         uint256 heldTarget = IERC20(target).balanceOf(address(this));
         IERC20(quoteToken).forceApprove(address(swapRouter), amount);
@@ -250,38 +237,31 @@ contract HydropumpRotator is Ownable2Step, ReentrancyGuardTransient {
                 deadline: block.timestamp,
                 amountIn: amount,
                 amountOutMinimum: 0,
-                limitSqrtPrice: limitSqrtPrice
+                limitSqrtPrice: _slippageLimit(locker.poolOf(target), quoteToken < target)
             })
         );
         IERC20(quoteToken).forceApprove(address(swapRouter), 0);
         quoteSpent = heldQuote - IERC20(quoteToken).balanceOf(address(this));
         bought = IERC20(target).balanceOf(address(this)) - heldTarget;
-
-        rotation.quoteHeld = amount - quoteSpent;
-        rotation.targetHeld += bought;
-        emit TargetBought(dead, target, quoteSpent, bought);
+        if (quoteSpent != amount) revert SlippageTooHigh();
     }
 
-    /// @dev Tightens `limitSqrtPrice` to `BUFFER_TICKS` past the pool's average over `TARGET_AVERAGE_WINDOW`.
-    function _withinAverage(address pool, bool zeroToOne, uint160 limitSqrtPrice)
-        internal
-        view
-        returns (uint160, bool room)
-    {
+    /// @dev `MAX_SLIPPAGE_TICKS` past the pool's average over `TARGET_AVERAGE_WINDOW`, in the buy's direction.
+    function _slippageLimit(address pool, bool zeroToOne) internal view returns (uint160) {
         uint32[] memory secondsAgos = new uint32[](2);
         secondsAgos[0] = TARGET_AVERAGE_WINDOW;
         (int56[] memory cumulatives,) = IAlgebraPlugin(IAlgebraPool(pool).plugin()).getTimepoints(secondsAgos);
         int256 average = int256(cumulatives[1] - cumulatives[0]) / int256(uint256(TARGET_AVERAGE_WINDOW));
 
-        int256 limit = zeroToOne ? average - SwapPriceLimit.BUFFER_TICKS : average + SwapPriceLimit.BUFFER_TICKS;
+        int256 limit = zeroToOne ? average - MAX_SLIPPAGE_TICKS : average + MAX_SLIPPAGE_TICKS;
         if (limit <= TickMath.MIN_TICK) limit = TickMath.MIN_TICK + 1;
         if (limit >= TickMath.MAX_TICK) limit = TickMath.MAX_TICK - 1;
-        uint160 averageLimit = TickMath.getSqrtRatioAtTick(int24(limit));
+        uint160 limitSqrtPrice = TickMath.getSqrtRatioAtTick(int24(limit));
 
-        if (zeroToOne ? averageLimit > limitSqrtPrice : averageLimit < limitSqrtPrice) limitSqrtPrice = averageLimit;
+        // Already past it: the router would reject the limit outright, so name the reason here.
         (uint160 spot,,,,,) = IAlgebraPool(pool).globalState();
-        room = zeroToOne ? spot > limitSqrtPrice : spot < limitSqrtPrice;
-        return (limitSqrtPrice, room);
+        if (zeroToOne ? spot <= limitSqrtPrice : spot >= limitSqrtPrice) revert SlippageTooHigh();
+        return limitSqrtPrice;
     }
 
     /// @dev A target must be a live Hydropump launch on the same quote, so the buy is one hop on its pool.
